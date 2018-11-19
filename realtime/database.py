@@ -8,11 +8,7 @@ import os
 import collections
 import threading
 
-try:
-    import ujson as json
-except ImportError:
-    import json
-
+import simplejson
 import yaml
 import pytoml
 
@@ -158,12 +154,12 @@ class DatabaseJSONFile(DatabaseFile):
 
     def handle_save(self):
         with open(self.filepath, 'w') as io:
-            json.dump(self._data, io, indent=2, sort_keys=True)
+            simplejson.dump(self._data, io, indent=2, sort_keys=True)
             io.close()
 
     def handle_load(self):
         with open(self.filepath, 'r') as io:
-            self._data = json.load(io)
+            self._data = simplejson.load(io)
             io.close()
 
 class DatabaseYAMLFile(DatabaseFile):
