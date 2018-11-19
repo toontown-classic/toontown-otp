@@ -7,23 +7,6 @@ keyword clsend;
 keyword ownsend;
 keyword airecv;
 
-from game import TimeManager/AI
-from game import DistributedCCharBase/AI
-from game import DistributedMickey/AI
-from game import DistributedDonald/AI
-from game import DistributedMinnie/AI
-from game import DistributedPluto/AI
-from game import DistributedGoofy/AI
-from game import DistributedToon/AI
-from game import DistributedBoat/AI
-from game import DistributedDGFlower/AI
-from game import DistributedFishingSpot/AI
-from game import DistributedDoor/AI
-from game import EstateManager/AI
-from game import DistributedMMPiano/AI
-from game import DistributedToonInterior/AI
-from game import DistributedHQInterior/AI
-
 // The most fundamental class
 dclass DistributedObject {
 };
