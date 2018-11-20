@@ -13,7 +13,7 @@ from panda3d.core import loadPrcFile
 if os.path.exists('config/general.prc'):
     loadPrcFile('config/general.prc')
 
-from panda3d.direct import get_config_showbase
+from pandac.PandaModules import *
 from direct.task.TaskManagerGlobal import taskMgr as task_mgr
 
 from realtime.notifier import notify
