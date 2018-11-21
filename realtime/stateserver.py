@@ -57,12 +57,13 @@ class StateObjectInterests(object):
     def __init__(self):
         self.old_interests = {}
         self.interests = {}
+        self.removed_interests = {}
 
     def had_parent_interest(self, parent_id):
-        return parent_id in self.old_interests
+        return parent_id in self.removed_interests
 
     def had_zone_interest(self, parent_id, zone_id):
-        return self.had_parent_interest(parent_id) and zone_id in self.old_interests[parent_id]
+        return self.had_parent_interest(parent_id) and zone_id in self.removed_interests[parent_id]
 
     def has_parent_interest(self, parent_id):
         return parent_id in self.interests
@@ -82,11 +83,13 @@ class StateObjectInterests(object):
         if not interest:
             return
 
+        removed_interest = self.removed_interests.setdefault(parent_id, [])
         if zone_id is not None:
             if zone_id not in interest:
                 return
 
             self.update_interest()
+            removed_interest.append(zone_id)
             interest.remove(zone_id)
         else:
             self.update_interest()
@@ -106,6 +109,9 @@ class StateObjectInterests(object):
     def clear_parent_interest(self):
         self.update_interest()
         self.interests = {}
+
+    def clear_removed_interest(self):
+        self.removed_interests = {}
 
 
 class StateObject(object):
@@ -727,6 +733,8 @@ class StateObjectManager(object):
                         state_object.handle_send_location_entry(other_object.owner_id)
                 elif other_object.interest_set.had_parent_interest(state_object.parent_id) and other_object.interest_set.had_zone_interest(state_object.parent_id, state_object.zone_id):
                     state_object.handle_send_departure(other_object.owner_id)
+
+        state_object.interest_set.clear_removed_interest()
 
     def handle_updating_field(self, state_object, sender, field, field_args, excludes=[]):
         for other_object in list(self.objects.values()):
