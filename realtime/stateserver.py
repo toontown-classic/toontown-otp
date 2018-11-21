@@ -108,6 +108,7 @@ class StateObjectInterests(object):
 
     def clear_parent_interest(self):
         self.update_interest()
+        self.removed_interests = dict(self.interests)
         self.interests = {}
 
     def clear_removed_interest(self):
