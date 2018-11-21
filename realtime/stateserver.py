@@ -194,9 +194,6 @@ class StateObject(object):
 
             self._required_fields[field.get_number()] = field_args
 
-        self._required_fields = collections.OrderedDict(sorted(
-            self._required_fields.items()))
-
         if self._has_other:
             num_fields = field_packer.raw_unpack_uint16()
             for _ in xrange(num_fields):
@@ -214,9 +211,6 @@ class StateObject(object):
                 field_packer.end_unpack()
 
                 self._other_fields[field.get_number()] = field_args
-
-        self._other_fields = collections.OrderedDict(sorted(
-            self._other_fields.items()))
 
         self._network.register_for_channel(self._do_id)
 
@@ -272,8 +266,11 @@ class StateObject(object):
         return self._has_other
 
     def append_required_data(self, datagram, broadcast_only=True):
+        sorted_fields = collections.OrderedDict(sorted(
+            self._required_fields.items()))
+
         field_packer = DCPacker()
-        for field_index, field_args in list(self._required_fields.items()):
+        for field_index, field_args in list(sorted_fields.items()):
             field = self._dc_class.get_field_by_index(field_index)
             if not field:
                 self.notify.error('Failed to append required data for field: %d '
