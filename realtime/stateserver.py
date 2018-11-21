@@ -5,7 +5,6 @@
  * Licensing information can found in 'LICENSE', which is part of this source code package.
 """
 
-import copy
 import collections
 
 from panda3d.direct import *
@@ -52,67 +51,103 @@ class ShardManager(object):
         return self.shards.get(channel)
 
 
-class StateObjectInterests(object):
+class InterestHandle(object):
+
+    def __init__(self, parent_id):
+        self._parent_id = parent_id
+        self._zone_ids = set()
+        self._old_zone_ids = set()
+
+    @property
+    def parent_id(self):
+        return self._parent_id
+
+    @property
+    def zone_ids(self):
+        return self._zone_ids
+
+    @property
+    def old_zone_ids(self):
+        return self._old_zone_ids
+
+    def has_zone_id(self, zone_id):
+        return zone_id in self._zone_ids
+
+    def had_zone_id(self, zone_id):
+        return zone_id in self._old_zone_ids
+
+    def add_zone_id(self, zone_id):
+        if zone_id in self._zone_ids:
+            return
+
+        self._zone_ids.add(zone_id)
+
+    def remove_zone_id(self, zone_id):
+        if zone_id not in self._zone_ids:
+            return
+
+        self._zone_ids.remove(zone_id)
+        self._old_zone_ids.add(zone_id)
+
+    def clear_zones(self):
+        self._old_zone_ids.update(self._zone_ids)
+        self._zone_ids.clear()
+
+    def clear_old_zones(self):
+        self._old_zone_ids.clear()
+
+    def destroy(self):
+        self._parent_id = 0
+        self._zone_ids = None
+        self._old_zone_ids = None
+
+
+class InterestManager(object):
 
     def __init__(self):
-        self.old_interests = {}
-        self.interests = {}
-        self.removed_interests = {}
+        self._interest_handles = {}
+        self._old_interest_handles = {}
 
-    def had_parent_interest(self, parent_id):
-        return parent_id in self.removed_interests
+    def has_interest(self, parent_id):
+        return parent_id in self._interest_handles
 
-    def had_zone_interest(self, parent_id, zone_id):
-        return self.had_parent_interest(parent_id) and zone_id in self.removed_interests[parent_id]
+    def had_interest(self, parent_id):
+        return parent_id in self._old_interest_handles
 
-    def has_parent_interest(self, parent_id):
-        return parent_id in self.interests
+    def add_interest(self, parent_id):
+        interest_handle = self._interest_handles.get(parent_id)
+        if not interest_handle:
+            interest_handle = InterestHandle(parent_id)
+            self._interest_handles[parent_id] = interest_handle
 
-    def has_zone_interest(self, parent_id, zone_id):
-        return self.has_parent_interest(parent_id) and zone_id in self.interests[parent_id]
+        return interest_handle
 
-    def add_interest(self, parent_id, zone_id):
-        interest = self.interests.setdefault(parent_id, [])
-        if zone_id in interest:
+    def remove_interest(self, parent_id):
+        if parent_id not in self._interest_handles:
             return
 
-        interest.append(zone_id)
+        interest_handle = self._interest_handles.pop(parent_id)
+        self._old_interest_handles[parent_id] = interest_handle
 
-    def remove_interest(self, parent_id, zone_id=None):
-        interest = self.interests.get(parent_id)
-        if not interest:
-            return
+    def get_interest(self, parent_id):
+        return self._interest_handles.get(parent_id)
 
-        removed_interest = self.removed_interests.setdefault(parent_id, [])
-        if zone_id is not None:
-            if zone_id not in interest:
-                return
+    def clear_interest(self):
+        for interest_handle in self._interest_handles.values():
+            interest_handle.clear_zones()
 
-            self.update_interest()
-            removed_interest.append(zone_id)
-            interest.remove(zone_id)
-        else:
-            self.update_interest()
-            del self.interests[parent_id]
+        self._old_interest_handles = dict(self._interest_handles)
+        self._interest_handles = {}
 
-    def update_interest(self):
-        self.old_interests = {}
-        self.old_interests = copy.deepcopy(self.interests)
+    def clear_old_interest(self):
+        for interest_handle in self._interest_handles.values():
+            interest_handle.clear_old_zones()
 
-    def clear_zone_interest(self, parent_id):
-        if not self.has_parent_interest(parent_id):
-            return
+        self._old_interest_handles = {}
 
-        self.update_interest()
-        self.interests[parent_id] = []
-
-    def clear_parent_interest(self):
-        self.update_interest()
-        self.removed_interests = dict(self.interests)
-        self.interests = {}
-
-    def clear_removed_interest(self):
-        self.removed_interests = {}
+    def destroy(self):
+        self._interest_handles = {}
+        self._old_interest_handles = {}
 
 
 class StateObject(object):
@@ -139,7 +174,7 @@ class StateObject(object):
         self._required_fields = {}
         self._other_fields = {}
 
-        self.interest_set = StateObjectInterests()
+        self.interest_manager = InterestManager()
 
         field_packer = DCPacker()
         field_packer.set_unpack_data(di.get_remaining_bytes())
@@ -398,11 +433,13 @@ class StateObject(object):
             self.handle_send_changing_ai(self._old_parent_id, self._old_parent_id,
                 self._parent_id)
 
-            self.interest_set.remove_interest(self._old_parent_id)
+            self.interest_manager.remove_interest(self._old_parent_id)
 
         if self._parent_id:
             self.handle_send_ai_entry(self._parent_id)
-            self.interest_set.add_interest(self._parent_id, OTP_ZONE_ID_OLD_QUIET_ZONE)
+
+            interest_handle = self.interest_manager.add_interest(self._parent_id)
+            interest_handle.add_zone_id(OTP_ZONE_ID_OLD_QUIET_ZONE)
 
         # the client can send set ai for it's owned object,
         # it will expect a response from us...
@@ -434,13 +471,12 @@ class StateObject(object):
 
         self.parent_id = self._parent_id
         self.zone_id = new_zone_id
+        interest_handle = self.interest_manager.get_interest(self._parent_id)
 
         if self._old_zone_id:
-            self.interest_set.remove_interest(self._parent_id, self._old_zone_id)
-
-            # remove street branch interest
+            interest_handle.remove_zone_id(self._old_zone_id)
             if self.get_in_street_branch(self._old_zone_id):
-                self.interest_set.remove_interest(self._parent_id, ZoneUtil.getBranchZone(self._old_zone_id))
+                interest_handle.remove_zone_id(ZoneUtil.getBranchZone(self._old_zone_id))
 
             self.handle_send_changing_location(self._parent_id)
             self.object_manager.handle_changing_location(self)
@@ -456,13 +492,11 @@ class StateObject(object):
             self.handle_send_set_zone_callback(self._owner_id, self._old_zone_id, self._zone_id)
 
         if self._zone_id and self._zone_id != OTP_ZONE_ID_OLD_QUIET_ZONE:
-            self.interest_set.add_interest(self._parent_id, self._zone_id)
-
-            # add street branch interest
+            interest_handle.add_zone_id(self._zone_id)
             if self.get_in_street_branch(self._zone_id):
-                self.interest_set.add_interest(self._parent_id, ZoneUtil.getBranchZone(self._zone_id))
+                interest_handle.add_zone_id(ZoneUtil.getBranchZone(self._zone_id))
 
-            self.interest_set.add_interest(self._parent_id, OTP_ZONE_ID_OLD_QUIET_ZONE)
+            interest_handle.add_zone_id(OTP_ZONE_ID_OLD_QUIET_ZONE)
             self.object_manager.handle_changing_location(self)
 
         # we must send the zone callback again to tell the client,
@@ -594,7 +628,6 @@ class StateObject(object):
 
         if not self._network.shard_manager.has_shard(sender):
             avatar_id = self._network.get_avatar_id_from_connection_channel(sender)
-
             if not avatar_id:
                 self.notify.warning('Cannot handle field update for field: %s dclass: %s, '
                     'unknown avatar: %d!' % (field.get_name(), self._dc_class.get_name(), avatar_id))
@@ -630,20 +663,21 @@ class StateObject(object):
                 self.object_manager.handle_updating_field(self, sender, field, field_args,
                     excludes=[avatar_id])
 
-            # the client has sent an broadcast field that is marked ram,
-            # store this field since it passes both the isclsend or isownsend tests...
-            if field_args is not None and field.is_ram():
-                # ensure the object the client sent the field update for
-                # has other fields...
-                if not self._has_other:
-                    return
+            if field_args is not None:
+                # the client has sent an broadcast field that is marked ram,
+                # store this field since it passes both the is clsend or is ownsend tests...
+                if field.is_ram():
+                    # ensure the object the client sent the field update for
+                    # has other fields...
+                    if not self._has_other:
+                        return
 
-                # check to see if this field is a required field, if it is then
-                # this means it should be stored as a required field....
-                if field.is_required():
-                    self._required_fields[field.get_number()] = field_args
-                else:
-                    self._other_fields[field.get_number()] = field_args
+                    # check to see if this field is a required field, if it is then
+                    # this means it should be stored as a required field....
+                    if field.is_required():
+                        self._required_fields[field.get_number()] = field_args
+                    else:
+                        self._other_fields[field.get_number()] = field_args
         else:
             # we must always send this update to the other receiver,
             # so that they get the field update always even if the field
@@ -656,29 +690,33 @@ class StateObject(object):
                 self.object_manager.handle_updating_field(self, self._parent_id, field, field_args,
                     excludes=[self._do_id])
 
-            # if the AI object sends specifically other (ram) fields for this object,
-            # this means the object now has other fields...
-            if field_args is not None and field.is_ram():
-                # check to see if this field is a required field, if it is then
-                # this means it should be stored as a required field....
-                if field.is_required():
-                    self._required_fields[field.get_number()] = field_args
-                else:
-                    self._other_fields[field.get_number()] = field_args
+            if field_args is not None:
+                # if the AI object sends specifically other (ram) fields for this object,
+                # this means the object now has other fields...
+                if field.is_ram():
+                    # check to see if this field is a required field, if it is then
+                    # this means it should be stored as a required field....
+                    if field.is_required():
+                        self._required_fields[field.get_number()] = field_args
+                    else:
+                        self._other_fields[field.get_number()] = field_args
 
-                # the object now has other fields, let's update the object's has_other
-                # value so that generates will be sent including the other fields...
-                self._has_other = True
+                    # the object now has other fields, let's update the object's has_other
+                    # value so that generates will be sent including the other fields...
+                    self._has_other = True
 
-            # check to see if the field is marked db, this means that we send the field
-            # to the database to override any current fields with that value...
-            if field_args is not None and field.is_db():
-                self.handle_send_save_field(field, field_args)
+                # check to see if the field is marked db, this means that we send the field
+                # to the database to override any current fields with that value...
+                if field.is_db():
+                    self.handle_send_save_field(field, field_args)
 
     def destroy(self):
-        self.interest_set.clear_parent_interest()
+        self.owner_id = 0
+        self.zone_id = 0
+        self.interest_manager.clear_interest()
         self.handle_send_departure(self._parent_id)
-        self.object_manager.handle_changing_location(self, force_delete=not self._owner_id)
+        self.object_manager.handle_changing_location(self)
+
 
 class StateObjectManager(object):
     notify = notify.new_category('StateObjectManager')
@@ -706,36 +744,34 @@ class StateObjectManager(object):
     def get_object(self, do_id):
         return self.objects.get(do_id)
 
-    def handle_changing_location(self, state_object, everyone_else=True, force_delete=False):
+    def handle_changing_location(self, state_object, everyone_else=True):
         for other_object in list(self.objects.values()):
             if other_object.do_id == state_object.do_id and everyone_else:
                 continue
 
             if state_object.owner_id:
-                if state_object.interest_set.has_parent_interest(other_object.parent_id) and state_object.interest_set.has_zone_interest(other_object.parent_id, other_object.zone_id):
-                    other_object.handle_send_location_entry(state_object.owner_id)
-                    if other_object.owner_id:
-                        state_object.handle_send_location_entry(other_object.owner_id)
-                elif state_object.interest_set.had_parent_interest(other_object.parent_id) and state_object.interest_set.had_zone_interest(other_object.parent_id, other_object.zone_id):
-                    other_object.handle_send_departure(state_object.owner_id)
-                    if other_object.owner_id:
-                        state_object.handle_send_departure(other_object.owner_id)
+                interest_handle = state_object.interest_manager.get_interest(other_object.parent_id)
+                if interest_handle:
+                    if interest_handle.has_zone_id(other_object.zone_id):
+                        other_object.handle_send_location_entry(state_object.owner_id)
+                        if other_object.owner_id:
+                            state_object.handle_send_location_entry(other_object.owner_id)
+                    elif interest_handle.had_zone_id(other_object.zone_id) or interest_handle.has_zone_id(other_object.old_zone_id):
+                        other_object.handle_send_departure(state_object.owner_id)
+                        if other_object.owner_id:
+                            state_object.handle_send_departure(other_object.owner_id)
             else:
                 if not other_object.owner_id:
                     continue
 
-                if other_object.interest_set.has_parent_interest(state_object.parent_id) and other_object.interest_set.has_zone_interest(state_object.parent_id, state_object.zone_id):
-                    # if object has interest and force delete is true, then let's assume
-                    # they still want to delete this AI object, because in some cases the avatar
-                    # can be present when the AI want's to delete it's object from their scope...
-                    if force_delete:
-                        state_object.handle_send_departure(other_object.owner_id)
-                    else:
+                interest_handle = other_object.interest_manager.get_interest(state_object.parent_id)
+                if interest_handle:
+                    if interest_handle.has_zone_id(state_object.zone_id):
                         state_object.handle_send_location_entry(other_object.owner_id)
-                elif other_object.interest_set.had_parent_interest(state_object.parent_id) and other_object.interest_set.had_zone_interest(state_object.parent_id, state_object.zone_id):
-                    state_object.handle_send_departure(other_object.owner_id)
+                    elif interest_handle.had_zone_id(state_object.zone_id) or interest_handle.has_zone_id(state_object.old_zone_id):
+                        state_object.handle_send_departure(other_object.owner_id)
 
-        state_object.interest_set.clear_removed_interest()
+        state_object.interest_manager.clear_old_interest()
 
     def handle_updating_field(self, state_object, sender, field, field_args, excludes=[]):
         for other_object in list(self.objects.values()):
@@ -745,8 +781,10 @@ class StateObjectManager(object):
             if not other_object.owner_id:
                 continue
 
-            if other_object.interest_set.has_parent_interest(state_object.parent_id) and other_object.interest_set.has_zone_interest(state_object.parent_id, state_object.zone_id):
-                state_object.handle_send_update_field(other_object.owner_id, sender, field, field_args)
+            interest_handle = other_object.interest_manager.get_interest(state_object.parent_id)
+            if interest_handle:
+                if interest_handle.has_zone_id(state_object.zone_id):
+                    state_object.handle_send_update_field(other_object.owner_id, sender, field, field_args)
 
 
 class StateServer(io.NetworkConnector):
@@ -868,7 +906,9 @@ class StateServer(io.NetworkConnector):
         dc_id = di.get_uint16()
 
         if self.object_manager.has_object(do_id):
-            self.notify.info('Failed to generate an already existing object with do_id: %d!' % do_id)
+            self.notify.info('Failed to generate an already existing '
+                'object with do_id: %d!' % do_id)
+
             return
 
         dc_class = self.dc_loader.dclasses_by_number.get(dc_id)
