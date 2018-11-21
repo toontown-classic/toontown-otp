@@ -189,7 +189,7 @@ class MessageInterface(object):
     def __init__(self, network):
         self._network = network
         self._message_timeout = config.GetFloat(
-            'messagedirector-message-timeout', 5.0)
+            'messagedirector-message-timeout', 15.0)
 
         self._messages = collections.deque()
         self._post_messages = {}

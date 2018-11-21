@@ -5,7 +5,7 @@ net-want-threads #f
 # MessageDirector:
 messagedirector-address 0.0.0.0
 messagedirector-port 7100
-messagedirector-message-timeout 5.0
+messagedirector-message-timeout 15.0
 
 # ClientAgent:
 clientagent-address 0.0.0.0
