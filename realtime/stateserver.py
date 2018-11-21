@@ -273,7 +273,7 @@ class StateObject(object):
 
     def append_required_data(self, datagram, broadcast_only=True):
         field_packer = DCPacker()
-        for field_index in self._required_fields:
+        for field_index, field_args in list(self._required_fields.items()):
             field = self._dc_class.get_field_by_index(field_index)
             if not field:
                 self.notify.error('Failed to append required data for field: %d '
@@ -283,14 +283,14 @@ class StateObject(object):
                 continue
 
             field_packer.begin_pack(field)
-            field.pack_args(field_packer, self._required_fields[field_index])
+            field.pack_args(field_packer, field_args)
             field_packer.end_pack()
 
         datagram.append_data(field_packer.get_string())
 
     def append_other_data(self, datagram):
         field_packer = DCPacker()
-        for field_index in self._other_fields:
+        for field_index, field_args in list(self._other_fields.items()):
             field = self._dc_class.get_field_by_index(field_index)
             if not field:
                 self.notify.error('Failed to append other data for field: %d '
@@ -298,7 +298,7 @@ class StateObject(object):
 
             field_packer.raw_pack_uint16(field.get_number())
             field_packer.begin_pack(field)
-            field.pack_args(field_packer, self._other_fields[field_index])
+            field.pack_args(field_packer, field_args)
             field_packer.end_pack()
 
         datagram.add_uint16(len(self._other_fields))
