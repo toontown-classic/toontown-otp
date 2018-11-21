@@ -788,7 +788,7 @@ class StateServer(io.NetworkConnector):
         state_object.handle_internal_datagram(sender, message_type, di)
 
     def handle_add_shard(self, sender, di):
-        shard = self.shard_manager.add_shard(sender, di.getString(), di.get_uint32())
+        shard = self.shard_manager.add_shard(sender, di.get_string(), di.get_uint32())
         self.handle_send_update_shard(shard)
 
     def handle_update_shard(self, sender, di):
