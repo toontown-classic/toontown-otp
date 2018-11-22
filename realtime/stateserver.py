@@ -534,12 +534,6 @@ class StateObject(object):
         new_parent_id = di.get_uint32()
         new_zone_id = di.get_uint32()
 
-        if new_parent_id == self._parent_id:
-            self.notify.debug('Failed to move to parent: %d for object: %d, '
-                'object did not change parents!' % (new_parent_id, self._do_id))
-
-            return
-
         if new_zone_id == self._zone_id:
             self.notify.debug('Failed to move to zone: %d for object: %d, '
                 'object did not change zones!' % (new_zone_id, self._do_id))
