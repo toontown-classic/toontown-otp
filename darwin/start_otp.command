@@ -1,2 +1,2 @@
 cd ..
-ppython -m realtime.main
+python -m realtime.main
