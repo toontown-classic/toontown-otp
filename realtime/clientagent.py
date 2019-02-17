@@ -1273,7 +1273,7 @@ class Client(io.NetworkHandler):
 
             # TODO: disney must have sent a few values to indicate the zone
             # and parent of the object, i'm not too sure what these values
-            # we're saying the client doesn't even use them...
+            # we're; as the client doesn't even use them...
             datagram.pad_bytes(12)
 
         datagram.add_uint16(zone_id)

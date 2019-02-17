@@ -303,3 +303,23 @@ class DatabaseInterface(object):
             self.handle_update_object_resp(di, False)
         elif message_type == types.DBSERVER_OBJECT_SET_FIELDS_IF_EQUALS_RESP:
             self.handle_update_object_resp(di, True)
+
+class DeferredCallback(object):
+    """
+    A class that represents a pending callback event when called
+    it initiates the callback event with the specified arguments
+    """
+
+    def __init__(self, function, *args, **kwargs):
+        assert(callable(function))
+        self._function = function
+        self._args = args
+        self._kwargs = kwargs
+
+    def callback(self):
+        return self._function(*self._args, **self._kwargs)
+
+    def destroy(self):
+        self._function = None
+        self._args = None
+        self._kwargs = None

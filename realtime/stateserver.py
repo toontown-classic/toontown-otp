@@ -12,6 +12,7 @@ from panda3d.direct import *
 from realtime import io
 from realtime import types
 from realtime.notifier import notify
+from realtime import util
 
 from game.OtpDoGlobals import *
 from game import ZoneUtil
@@ -19,8 +20,9 @@ from game import ZoneUtil
 
 class Shard(object):
 
-    def __init__(self, channel, name, population):
+    def __init__(self, channel, district_id, name, population):
         self.channel = channel
+        self.district_id = district_id
         self.name = name
         self.population = population
 
@@ -33,11 +35,11 @@ class ShardManager(object):
     def has_shard(self, channel):
         return channel in self.shards
 
-    def add_shard(self, channel, name, population):
+    def add_shard(self, channel, district_id, name, population):
         if self.has_shard(channel):
             return
 
-        shard = Shard(channel, name, population)
+        shard = Shard(channel, district_id, name, population)
         self.shards[channel] = shard
         return shard
 
@@ -51,105 +53,6 @@ class ShardManager(object):
         return self.shards.get(channel)
 
 
-class InterestHandle(object):
-
-    def __init__(self, parent_id):
-        self._parent_id = parent_id
-        self._zone_ids = set()
-        self._old_zone_ids = set()
-
-    @property
-    def parent_id(self):
-        return self._parent_id
-
-    @property
-    def zone_ids(self):
-        return self._zone_ids
-
-    @property
-    def old_zone_ids(self):
-        return self._old_zone_ids
-
-    def has_zone_id(self, zone_id):
-        return zone_id in self._zone_ids
-
-    def had_zone_id(self, zone_id):
-        return zone_id in self._old_zone_ids
-
-    def add_zone_id(self, zone_id):
-        if zone_id in self._zone_ids:
-            return
-
-        self._zone_ids.add(zone_id)
-
-    def remove_zone_id(self, zone_id):
-        if zone_id not in self._zone_ids:
-            return
-
-        self._zone_ids.remove(zone_id)
-        self._old_zone_ids.add(zone_id)
-
-    def clear_zones(self):
-        self._old_zone_ids.update(self._zone_ids)
-        self._zone_ids.clear()
-
-    def clear_old_zones(self):
-        self._old_zone_ids.clear()
-
-    def destroy(self):
-        self._parent_id = 0
-        self._zone_ids = None
-        self._old_zone_ids = None
-
-
-class InterestManager(object):
-
-    def __init__(self):
-        self._interest_handles = {}
-        self._old_interest_handles = {}
-
-    def has_interest(self, parent_id):
-        return parent_id in self._interest_handles
-
-    def had_interest(self, parent_id):
-        return parent_id in self._old_interest_handles
-
-    def add_interest(self, parent_id):
-        interest_handle = self._interest_handles.get(parent_id)
-        if not interest_handle:
-            interest_handle = InterestHandle(parent_id)
-            self._interest_handles[parent_id] = interest_handle
-
-        return interest_handle
-
-    def remove_interest(self, parent_id):
-        if parent_id not in self._interest_handles:
-            return
-
-        interest_handle = self._interest_handles.pop(parent_id)
-        self._old_interest_handles[parent_id] = interest_handle
-
-    def get_interest(self, parent_id):
-        return self._interest_handles.get(parent_id)
-
-    def clear_interest(self):
-        for interest_handle in self._interest_handles.values():
-            interest_handle.clear_zones()
-
-        self._old_interest_handles = dict(self._interest_handles)
-        self._interest_handles = {}
-
-    def clear_old_interest(self):
-        for interest_handle in self._interest_handles.values():
-            interest_handle.clear_old_zones()
-
-        self._old_interest_handles = {}
-
-    def destroy(self):
-        self._interest_handles = {}
-        self._old_interest_handles = {}
-
-
 class StateObject(object):
     notify = notify.new_category('StateObject')
 
@@ -158,6 +61,9 @@ class StateObject(object):
         self.object_manager = object_manager
 
         self._do_id = do_id
+
+        self._old_ai_channel = 0
+        self._ai_channel = 0
 
         self._old_owner_id = 0
         self._owner_id = 0
@@ -174,7 +80,9 @@ class StateObject(object):
         self._required_fields = {}
         self._other_fields = {}
 
-        self.interest_manager = InterestManager()
+        self._zone_objects = {}
+
+        self._deferred_callback = None
 
         field_packer = DCPacker()
         field_packer.set_unpack_data(di.get_remaining_bytes())
@@ -217,6 +125,19 @@ class StateObject(object):
     @property
     def do_id(self):
         return self._do_id
+
+    @property
+    def old_ai_channel(self):
+        return self._old_ai_channel
+
+    @property
+    def ai_channel(self):
+        return self._ai_channel
+
+    @ai_channel.setter
+    def ai_channel(self, ai_channel):
+        self._old_ai_channel = self._ai_channel
+        self._ai_channel = ai_channel
 
     @property
     def old_owner_id(self):
@@ -264,6 +185,32 @@ class StateObject(object):
     @property
     def has_other(self):
         return self._has_other
+
+    def has_child(self, child_do_id):
+        return self.get_zone_from_child(child_do_id) is not None
+
+    def has_child_in_zone(self, child_do_id, zone_id):
+        return self.get_zone_from_child(child_do_id) == zone_id
+
+    def add_child_in_zone(self, child_do_id, zone_id):
+        zone_objects = self._zone_objects.setdefault(zone_id, [])
+        zone_objects.append(child_do_id)
+
+    def remove_child_from_zone(self, child_do_id, zone_id):
+        zone_objects = self._zone_objects.get(zone_id, None)
+        assert(zone_objects != None)
+        if child_do_id in zone_objects:
+            zone_objects.remove(child_do_id)
+
+        if not len(zone_objects):
+            del self._zone_objects[zone_id]
+
+    def get_zone_from_child(self, child_do_id):
+        for zone_id, zone_objects in list(self._zone_objects.items()):
+            if child_do_id in zone_objects:
+                return zone_id
+
+        return None
 
     def append_required_data(self, datagram, broadcast_only=True):
         sorted_fields = collections.OrderedDict(sorted(
@@ -325,6 +272,11 @@ class StateObject(object):
             self.handle_set_zone(sender, di)
         elif message_type == types.STATESERVER_OBJECT_CHANGING_LOCATION:
             self.handle_changing_location(sender, di)
+        elif message_type == types.STATESERVER_OBJECT_LOCATION_ACK:
+            # if we have a callback pending to be called when the location
+            # has been successfully approved, then call it and clear it...
+            if self._deferred_callback:
+                self._deferred_callback.callback()
         else:
             self.notify.warning('Received unknown message type: %d '
                 'for object %d!' % (message_type, self._do_id))
@@ -356,7 +308,6 @@ class StateObject(object):
         datagram.add_uint16(self._dc_class.get_number())
 
         self.append_required_data(datagram, broadcast_only=False)
-
         if self._has_other:
             self.append_other_data(datagram)
 
@@ -372,30 +323,28 @@ class StateObject(object):
 
         self.owner_id = new_owner_id
         if self._old_owner_id:
-            self.handle_send_changing_owner(self._old_owner_id, self._old_owner_id,
-                self._owner_id)
+            self.handle_send_changing_owner(self._old_owner_id, self._old_owner_id, self._owner_id)
 
         if self._owner_id:
             self.handle_send_owner_entry(self._owner_id)
 
-    def handle_send_changing_ai(self, channel, old_parent_id, new_parent_id):
+    def handle_send_changing_ai(self, channel, old_ai_channel, new_ai_channel):
         datagram = io.NetworkDatagram()
         datagram.add_header(channel, self._do_id,
             types.STATESERVER_OBJECT_CHANGING_AI)
 
         datagram.add_uint64(self._do_id)
-        datagram.add_uint64(old_parent_id)
-        datagram.add_uint64(new_parent_id)
+        datagram.add_uint64(self._old_ai_channel)
+        datagram.add_uint64(self._ai_channel)
         self._network.handle_send_connection_datagram(datagram)
 
-    def handle_send_ai_entry(self, channel):
+    def handle_send_ai_entry(self, ai_channel):
         datagram = io.NetworkDatagram()
-
         if not self._has_other:
-            datagram.add_header(channel, self._do_id,
+            datagram.add_header(ai_channel, self._do_id,
                 types.STATESERVER_OBJECT_ENTER_AI_WITH_REQUIRED)
         else:
-            datagram.add_header(channel, self._do_id,
+            datagram.add_header(ai_channel, self._do_id,
                 types.STATESERVER_OBJECT_ENTER_AI_WITH_REQUIRED_OTHER)
 
         datagram.add_uint64(self._do_id)
@@ -404,7 +353,6 @@ class StateObject(object):
         datagram.add_uint16(self._dc_class.get_number())
 
         self.append_required_data(datagram, broadcast_only=not self._owner_id)
-
         if self._has_other:
             self.append_other_data(datagram)
 
@@ -418,30 +366,43 @@ class StateObject(object):
         self._network.handle_send_connection_datagram(datagram)
 
     def handle_set_ai(self, sender, di):
-        new_parent_id = di.get_uint64()
-        if new_parent_id == self._parent_id:
-            self.notify.debug('Failed to set new parent: %d for object %d, '
-                'object did not change parents!' % (new_parent_id, self._do_id))
+        new_ai_channel = di.get_uint64()
+        if new_ai_channel == self._ai_channel:
+            self.notify.debug('Failed to set new AI: %d for object %d, '
+                'object did not change AI\'s!' % (new_ai_channel, self._do_id))
 
             return
 
-        self.parent_id = new_parent_id
-        if self._old_parent_id:
-            self.handle_send_changing_ai(self._old_parent_id, self._old_parent_id,
-                self._parent_id)
+        shard = self._network.shard_manager.get_shard(new_ai_channel)
+        if not shard:
+            self.notify.warning('Failed to set new AI: %d for object %d, '
+                'no AI was found with that channel!' % (new_ai_channel, self._do_id))
 
-            self.interest_manager.remove_interest(self._old_parent_id)
+            return
 
-        if self._parent_id:
-            self.handle_send_ai_entry(self._parent_id)
+        self.ai_channel = new_ai_channel
+        if self._old_ai_channel:
+            self.handle_send_changing_ai(self.old_ai_channel)
 
-            interest_handle = self.interest_manager.add_interest(self._parent_id)
-            interest_handle.add_zone_id(OTP_ZONE_ID_OLD_QUIET_ZONE)
+        # tell the new AI that we are being moved to their channel,
+        # and that we are now present on their channel...
+        self.handle_send_ai_entry(self._ai_channel)
 
         # the client can send set ai for it's owned object,
         # it will expect a response from us...
         if self._owner_id:
-            self.handle_set_ai_callback(self._owner_id)
+            self.parent_id = shard.district_id
+
+            # setup a deferred callback object that's called back when
+            # the changing location response is received...
+            self._deferred_callback = util.DeferredCallback(self.ai_change_callback)
+
+        self.object_manager.handle_changing_location(self)
+
+    def ai_change_callback(self):
+        self.handle_set_ai_callback(self._owner_id)
+        self._deferred_callback.destroy()
+        self._deferred_callback = None
 
     def handle_send_changing_location(self, channel):
         datagram = io.NetworkDatagram()
@@ -464,43 +425,23 @@ class StateObject(object):
         self._network.handle_send_connection_datagram(datagram)
 
     def handle_set_zone(self, sender, di):
-        new_zone_id = di.get_uint32()
+        self.zone_id = di.get_uint32()
 
-        self.parent_id = self._parent_id
-        self.zone_id = new_zone_id
-        interest_handle = self.interest_manager.get_interest(self._parent_id)
-
-        if self._old_zone_id:
-            interest_handle.remove_zone_id(self._old_zone_id)
-            if self.get_in_street_branch(self._old_zone_id):
-                interest_handle.remove_zone_id(ZoneUtil.getBranchZone(self._old_zone_id))
-
-            self.handle_send_changing_location(self._parent_id)
-            self.object_manager.handle_changing_location(self)
-
-        # the client can send set zone for it's owned object,
-        # it will expect a response from us...
         if self._owner_id:
-            # send the quiet zone objects before sending the zone objects,
-            # this is how the client expects generation order...
-            if self._zone_id == OTP_ZONE_ID_OLD_QUIET_ZONE:
-                self.object_manager.handle_changing_location(self)
-
+            # setup a deferred callback object that's called back when
+            # the changing location response is received...
+            self._deferred_callback = util.DeferredCallback(self.zone_change_callback)
             self.handle_send_set_zone_callback(self._owner_id, self._old_zone_id, self._zone_id)
 
-        if self._zone_id and self._zone_id != OTP_ZONE_ID_OLD_QUIET_ZONE:
-            interest_handle.add_zone_id(self._zone_id)
-            if self.get_in_street_branch(self._zone_id):
-                interest_handle.add_zone_id(ZoneUtil.getBranchZone(self._zone_id))
+        self.object_manager.handle_changing_location(self)
+        self.handle_send_changing_location(self._ai_channel)
 
-            interest_handle.add_zone_id(OTP_ZONE_ID_OLD_QUIET_ZONE)
-            self.object_manager.handle_changing_location(self)
+    def zone_change_callback(self):
+        self.handle_send_set_zone_callback(self._owner_id, self._old_zone_id, self._zone_id,
+            zone_change_complete=True)
 
-        # we must send the zone callback again to tell the client,
-        # that all of the objects from the last zone message have been generated...
-        if self._owner_id:
-            self.handle_send_set_zone_callback(self._owner_id, self._old_zone_id, self._zone_id,
-                zone_change_complete=True)
+        self._deferred_callback.destroy()
+        self._deferred_callback = None
 
     def handle_send_location_entry(self, channel):
         datagram = io.NetworkDatagram()
@@ -530,20 +471,117 @@ class StateObject(object):
         datagram.add_uint32(self._do_id)
         self._network.handle_send_connection_datagram(datagram)
 
+    def broadcast_object_entry_in_zone(self, child_object, zone_id):
+        assert(child_object != None)
+        zone_objects = self._zone_objects.get(zone_id, [])
+        for do_id in zone_objects:
+            state_object = self.object_manager.get_object(do_id)
+            if not state_object:
+                continue
+
+            if not state_object.owner_id:
+                continue
+
+            child_object.handle_send_location_entry(state_object.owner_id)
+
+    def broadcast_object_departure_in_zone(self, child_object, zone_id):
+        assert(child_object != None)
+        zone_objects = self._zone_objects.get(zone_id, [])
+        for do_id in zone_objects:
+            state_object = self.object_manager.get_object(do_id)
+            if not state_object:
+                continue
+
+            if not state_object.owner_id:
+                continue
+
+            child_object.handle_send_departure(state_object.owner_id)
+
+    def broadcast_objects_to_owner_in_zone(self, child_object, zone_id):
+        assert(child_object != None)
+        assert(child_object.owner_id != 0)
+        zone_objects = self._zone_objects.get(zone_id, [])
+        for do_id in zone_objects:
+            state_object = self.object_manager.get_object(do_id)
+            if not state_object:
+                continue
+
+            if state_object.do_id == child_object.do_id:
+                continue
+
+            state_object.handle_send_location_entry(child_object.owner_id)
+
+    def broadcast_update_to_owners_in_zone(self, child_object, zone_id, sender, field, field_args, excludes=[]):
+        assert(child_object != None)
+        zone_objects = self._zone_objects.get(zone_id, [])
+        for do_id in zone_objects:
+            state_object = self.object_manager.get_object(do_id)
+            if not state_object:
+                continue
+
+            if state_object.do_id in excludes:
+                continue
+
+            if not state_object.owner_id:
+                continue
+
+            child_object.handle_send_update_field(state_object.owner_id, sender, field, field_args)
+
     def handle_changing_location(self, sender, di):
+        child_do_id = di.get_uint32()
         new_parent_id = di.get_uint32()
         new_zone_id = di.get_uint32()
 
-        if new_zone_id == self._zone_id:
-            self.notify.debug('Failed to move to zone: %d for object: %d, '
-                'object did not change zones!' % (new_zone_id, self._do_id))
+        # retrieve this object from it's do_id, if we cannot find this object in the do_id to do
+        # dictionary, then this is an invalid object.
+        child_object = self.object_manager.get_object(child_do_id)
+        if not child_object:
+            self.notify.debug('Cannot handle changing locations for object: %d, '
+                'object does not exist on the state server!' % child_do_id)
 
             return
 
-        self.parent_id = new_parent_id
-        self.zone_id = new_zone_id
+        # check to see if we have this child in our list of children to zones,
+        # if so, check to see if the zone has changed locations from where it was previously,
+        # and if they have indeed changed locations, then either remove them or update their location...
+        if self.has_child(child_object.do_id):
+            child_zone_id = self.get_zone_from_child(child_object.do_id)
+            if new_parent_id != self._do_id:
+                # remove the child from their previous zone
+                self.remove_child_from_zone(child_object.do_id, child_zone_id)
+                self.broadcast_object_departure_in_zone(child_object, child_zone_id)
+            elif new_zone_id != child_zone_id:
+                # remove the child from their previous zone
+                self.remove_child_from_zone(child_object.do_id, child_zone_id)
+                self.broadcast_object_departure_in_zone(child_object, child_zone_id)
 
-        self.object_manager.handle_changing_location(self)
+                # add the child to their new zone
+                self.broadcast_object_entry_in_zone(child_object, new_zone_id)
+                self.add_child_in_zone(child_object.do_id, new_zone_id)
+
+                # send the child object all of the objects that are in the new zone
+                if child_object.owner_id:
+                    self.broadcast_objects_to_owner_in_zone(child_object, new_zone_id)
+        else:
+            # ensure the parent id specified is infact our do id
+            assert(new_parent_id == self._do_id)
+
+            # add the child to their new zone
+            self.broadcast_object_entry_in_zone(child_object, new_zone_id)
+            self.add_child_in_zone(child_object.do_id, new_zone_id)
+
+            # send the child object all of the objects that are in the new zone
+            if child_object.owner_id:
+                self.broadcast_objects_to_owner_in_zone(child_object, new_zone_id)
+
+        # tell the sender that we acknowledge that they've changed locations
+        datagram = io.NetworkDatagram()
+        datagram.add_header(child_object.do_id, self._do_id,
+            types.STATESERVER_OBJECT_LOCATION_ACK)
+
+        datagram.add_uint32(new_parent_id)
+        datagram.add_uint32(new_zone_id)
+        self._network.handle_send_connection_datagram(datagram)
 
     def handle_send_update_field(self, channel, sender, field, field_args):
         datagram = io.NetworkDatagram()
@@ -555,7 +593,6 @@ class StateObject(object):
 
         field_packer = DCPacker()
         field_packer.begin_pack(field)
-
         if field_args is not None:
             field.pack_args(field_packer, field_args)
 
@@ -611,11 +648,11 @@ class StateObject(object):
             field_args = None
 
         di = io.NetworkDatagramIterator(datagram)
-        if field.is_bogus_field():
-            self.notify.warning('Cannot handle field update for field: %s dclass: %s, field is bogus!' % (
-                field.get_name(), self._dc_class.get_name()))
-
-            return
+        #if field.is_bogus_field():
+        #    self.notify.warning('Cannot handle field update for field: %s dclass: %s, field is bogus!' % (
+        #        field.get_name(), self._dc_class.get_name()))
+        #
+        #    return
 
         if not self._network.shard_manager.has_shard(sender):
             avatar_id = self._network.get_avatar_id_from_connection_channel(sender)
@@ -646,13 +683,12 @@ class StateObject(object):
             # we must always send this update to the other receiver,
             # so that they get the field update always even if the field
             # is broadcasted to other objects in the same interest...
-            self.handle_send_update_field(self._parent_id, sender, field, field_args)
+            self.handle_send_update_field(self._ai_channel, sender, field, field_args)
 
             # if the field is marked broadcast, then we can proceed to broadcast
             # this field to any other objects in our interest.
             if field.is_broadcast():
-                self.object_manager.handle_updating_field(self, sender, field, field_args,
-                    excludes=[avatar_id])
+                self.object_manager.handle_updating_field(self, sender, field, field_args, excludes=[avatar_id])
 
             if field_args is not None:
                 # the client has sent an broadcast field that is marked ram,
@@ -673,13 +709,12 @@ class StateObject(object):
             # we must always send this update to the other receiver,
             # so that they get the field update always even if the field
             # is broadcasted to other objects in the same interest...
-            self.handle_send_update_field(self._owner_id, self._parent_id, field, field_args)
+            self.handle_send_update_field(self._owner_id, self._ai_channel, field, field_args)
 
             # if the field is marked broadcast, then we can proceed to broadcast
             # this field to any other objects in our interest.
             if field.is_broadcast():
-                self.object_manager.handle_updating_field(self, self._parent_id, field, field_args,
-                    excludes=[self._do_id])
+                self.object_manager.handle_updating_field(self, self._parent_id, field, field_args, excludes=[self.do_id])
 
             if field_args is not None:
                 # if the AI object sends specifically other (ram) fields for this object,
@@ -702,10 +737,13 @@ class StateObject(object):
                     self.handle_send_save_field(field, field_args)
 
     def destroy(self):
-        self.owner_id = 0
+        self.parent_id = 0
         self.zone_id = 0
-        self.interest_manager.clear_interest()
-        self.handle_send_departure(self._parent_id)
+
+        # kill our object on it's AI channel...
+        self.handle_send_departure(self._ai_channel)
+
+        # release our object's interests
         self.object_manager.handle_changing_location(self)
 
 
@@ -735,47 +773,36 @@ class StateObjectManager(object):
     def get_object(self, do_id):
         return self.objects.get(do_id)
 
-    def handle_changing_location(self, state_object, everyone_else=True):
-        for other_object in list(self.objects.values()):
-            if other_object.do_id == state_object.do_id and everyone_else:
-                continue
+    def handle_changing_location(self, state_object):
+        assert(state_object != None)
+        # tell the object's previous parent that we've moved away from under
+        # them and are no longer in the previous location...
+        if state_object.old_parent_id:
+            state_object.handle_send_changing_location(state_object.old_parent_id)
 
-            if state_object.owner_id:
-                interest_handle = state_object.interest_manager.get_interest(other_object.parent_id)
-                if interest_handle:
-                    if interest_handle.has_zone_id(other_object.zone_id):
-                        other_object.handle_send_location_entry(state_object.owner_id)
-                        if other_object.owner_id:
-                            state_object.handle_send_location_entry(other_object.owner_id)
-                    elif interest_handle.had_zone_id(other_object.zone_id) or interest_handle.has_zone_id(other_object.old_zone_id):
-                        other_object.handle_send_departure(state_object.owner_id)
-                        if other_object.owner_id:
-                            state_object.handle_send_departure(other_object.owner_id)
-            else:
-                if not other_object.owner_id:
-                    continue
-
-                interest_handle = other_object.interest_manager.get_interest(state_object.parent_id)
-                if interest_handle:
-                    if interest_handle.has_zone_id(state_object.zone_id):
-                        state_object.handle_send_location_entry(other_object.owner_id)
-                    elif interest_handle.had_zone_id(state_object.zone_id) or interest_handle.has_zone_id(state_object.old_zone_id):
-                        state_object.handle_send_departure(other_object.owner_id)
-
-        state_object.interest_manager.clear_old_interest()
+        # also tell the object's new parent that they have changed locations under
+        # them in a zone of their's...
+        if state_object.parent_id:
+            state_object.handle_send_changing_location(state_object.parent_id)
 
     def handle_updating_field(self, state_object, sender, field, field_args, excludes=[]):
-        for other_object in list(self.objects.values()):
-            if other_object.do_id in excludes:
-                continue
+        assert(state_object != None)
+        if not state_object.parent_id:
+            self.notify.debug('Cannot handle updating field for object: %d, '
+                'object has no parent!' % state_object.do_id)
 
-            if not other_object.owner_id:
-                continue
+            return
 
-            interest_handle = other_object.interest_manager.get_interest(state_object.parent_id)
-            if interest_handle:
-                if interest_handle.has_zone_id(state_object.zone_id):
-                    state_object.handle_send_update_field(other_object.owner_id, sender, field, field_args)
+        parent_object = self.get_object(state_object.parent_id)
+        if not parent_object:
+            self.notify.debug('Cannot handle updating field for object: %d, '
+                'object has no parent!' % state_object.do_id)
+
+            return
+
+        if parent_object.has_child(state_object.do_id):
+            child_zone_id = parent_object.get_zone_from_child(state_object.do_id)
+            parent_object.broadcast_update_to_owners_in_zone(state_object, child_zone_id, sender, field, field_args, excludes)
 
 
 class StateServer(io.NetworkConnector):
@@ -818,7 +845,7 @@ class StateServer(io.NetworkConnector):
         state_object.handle_internal_datagram(sender, message_type, di)
 
     def handle_add_shard(self, sender, di):
-        shard = self.shard_manager.add_shard(sender, di.get_string(), di.get_uint32())
+        shard = self.shard_manager.add_shard(sender, di.get_uint32(), di.get_string(), di.get_uint32())
         self.handle_send_update_shard(shard)
 
     def handle_update_shard(self, sender, di):
@@ -845,7 +872,7 @@ class StateServer(io.NetworkConnector):
             if not state_object.owner_id:
                 continue
 
-            if state_object.parent_id != shard.channel and only_children:
+            if state_object.ai_channel != shard.channel and only_children:
                 continue
 
             self.handle_get_shard_list(state_object.owner_id)
@@ -855,7 +882,7 @@ class StateServer(io.NetworkConnector):
             if not state_object.owner_id:
                 continue
 
-            if state_object.parent_id != shard.channel:
+            if state_object.ai_channel != shard.channel:
                 continue
 
             # if this object is owned and since this shard is closed,
@@ -909,8 +936,14 @@ class StateServer(io.NetworkConnector):
 
             return
 
-        state_object = StateObject(self, self.object_manager, do_id, parent_id,
-            zone_id, dc_class, has_other, di)
+        state_object = StateObject(self, self.object_manager, do_id, parent_id, zone_id,
+            dc_class, has_other, di)
+
+        # TODO FIXME: find a better way to do this!!!
+        # set the state object's AI channel only if the AI it's self
+        # actually sent this generate message for this object...
+        if self.shard_manager.has_shard(sender):
+            state_object.ai_channel = sender
 
         self.object_manager.add_object(state_object)
 
