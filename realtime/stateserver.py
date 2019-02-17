@@ -381,7 +381,7 @@ class StateObject(object):
             return
 
         self.ai_channel = new_ai_channel
-        if self._old_ai_channel:
+        if self._old_ai_channel != new_ai_channel:
             self.handle_send_changing_ai(self.old_ai_channel)
 
         # tell the new AI that we are being moved to their channel,
