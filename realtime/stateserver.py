@@ -328,7 +328,7 @@ class StateObject(object):
         if self._owner_id:
             self.handle_send_owner_entry(self._owner_id)
 
-    def handle_send_changing_ai(self, channel, old_ai_channel, new_ai_channel):
+    def handle_send_changing_ai(self, channel):
         datagram = io.NetworkDatagram()
         datagram.add_header(channel, self._do_id,
             types.STATESERVER_OBJECT_CHANGING_AI)
