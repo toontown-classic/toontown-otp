@@ -5,6 +5,7 @@
 """
 
 import collections
+import threading
 
 from panda3d.core import *
 from panda3d.direct import *
@@ -168,6 +169,7 @@ class NetworkConnector(NetworkManager):
 
         self.__socket = None
         self._readable = collections.deque()
+        self._read_mutex = threading.RLock()
 
         self.__read_task = None
         self.__update_task = None
@@ -246,11 +248,12 @@ class NetworkConnector(NetworkManager):
 
         datagram = self._readable.popleft()
         di = NetworkDatagramIterator(datagram)
-
         if not di.get_remaining_size():
             return task.cont
 
-        self.handle_internal_datagram(di)
+        with self._read_mutex:
+            self.handle_internal_datagram(di)
+
         return task.cont
 
     def __listen_disconnect(self, task):
@@ -332,6 +335,8 @@ class NetworkHandler(NetworkManager):
         self._allocated_channel = channel
 
         self._readable = collections.deque()
+        self._read_mutex = threading.RLock()
+
         self.__update_task = None
 
     @property
@@ -416,11 +421,12 @@ class NetworkHandler(NetworkManager):
 
         datagram = self._readable.popleft()
         di = NetworkDatagramIterator(datagram)
-
         if not di.get_remaining_size():
             return task.cont
 
-        self.handle_datagram(di)
+        with self._read_mutex:
+            self.handle_datagram(di)
+
         return task.cont
 
     def handle_send_datagram(self, datagram):
