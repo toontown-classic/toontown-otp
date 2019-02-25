@@ -316,8 +316,19 @@ class DeferredCallback(object):
         self._args = args
         self._kwargs = kwargs
 
-    def callback(self):
-        return self._function(*self._args, **self._kwargs)
+    def callback(self, *args, **kwargs):
+        cb_args = []
+        cb_args.extend(args)
+        cb_args.extend(self._args)
+
+        cb_kwargs = dict(kwargs.items() + self._kwargs.items())
+
+        result = self._function(*cb_args, **cb_kwargs)
+
+        del cb_args
+        del cb_kwargs
+
+        return result
 
     def destroy(self):
         self._function = None

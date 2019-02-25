@@ -8,6 +8,7 @@
 import collections
 import time
 import semidbm
+import itertools
 
 from panda3d.core import *
 from panda3d.direct import *
@@ -852,6 +853,38 @@ class ClientAccountManager(ClientOperationManager):
 
         operation.request('Start')
 
+class InterestManager(object):
+
+    def __init__(self):
+        self._interest_zones = []
+
+    @property
+    def interest_zones(self):
+        return self._interest_zones
+
+    def has_interest_zone(self, zone_id):
+        return zone_id in self._interest_zones
+
+    def add_interest_zone(self, zone_id):
+        if zone_id in self._interest_zones:
+            return
+
+        self._interest_zones.append(zone_id)
+
+    def remove_interest_zone(self, zone_id):
+        if zone_id not in self._interest_zones:
+            return
+
+        # we never remove interest in the quiet zone as the client
+        # should always have the quiet zone objects...
+        if zone_id == OTP_ZONE_ID_OLD_QUIET_ZONE:
+            return
+
+        self._interest_zones.remove(zone_id)
+
+    def clear(self):
+        self._interest_zones = []
+
 class Client(io.NetworkHandler):
     notify = notify.new_category('Client')
 
@@ -860,6 +893,13 @@ class Client(io.NetworkHandler):
 
         self.channel = self.network.channel_allocator.allocate()
         self._authenticated = False
+
+        self._interest_manager = InterestManager()
+        self._deferred_callback = None
+
+        self._seen_objects = {}
+        self._owned_objects = []
+        self._pending_objects = []
 
     @property
     def authenticated(self):
@@ -953,10 +993,10 @@ class Client(io.NetworkHandler):
             self.handle_friend_offline(di)
         elif message_type == types.STATESERVER_GET_SHARD_ALL_RESP:
             self.handle_get_shard_list_resp(di)
-        elif message_type == types.STATESERVER_OBJECT_SET_AI_RESP:
-            self.handle_object_set_shard_resp(di)
-        elif message_type == types.STATESERVER_OBJECT_SET_ZONE_RESP:
-            self.handle_set_zone_resp(di)
+        elif message_type == types.STATESERVER_OBJECT_LOCATION_ACK:
+            self.handle_object_location_ack(di)
+        elif message_type == types.STATESERVER_OBJECT_GET_ZONES_OBJECTS_RESP:
+            self.handle_object_get_zones_objects_resp(di)
         elif message_type == types.STATESERVER_OBJECT_ENTER_OWNER_WITH_REQUIRED:
             self.handle_object_enter_owner(False, di)
         elif message_type == types.STATESERVER_OBJECT_ENTER_OWNER_WITH_REQUIRED_OTHER:
@@ -1228,6 +1268,7 @@ class Client(io.NetworkHandler):
             return
 
         avatar_id = self.get_avatar_id_from_connection_channel(self.channel)
+        self._deferred_callback = util.DeferredCallback(self.handle_set_shard_callback)
 
         datagram = io.NetworkDatagram()
         datagram.add_header(avatar_id, self.channel,
@@ -1236,7 +1277,7 @@ class Client(io.NetworkHandler):
         datagram.add_uint64(shard_id)
         self.network.handle_send_connection_datagram(datagram)
 
-    def handle_object_set_shard_resp(self, di):
+    def handle_set_shard_callback(self, do_id, old_parent_id, old_zone_id, new_parent_id, new_zone_id):
         datagram = io.NetworkDatagram()
         datagram.add_uint16(types.CLIENT_GET_STATE_RESP)
         self.handle_send_datagram(datagram)
@@ -1252,6 +1293,7 @@ class Client(io.NetworkHandler):
             return
 
         avatar_id = self.get_avatar_id_from_connection_channel(self.channel)
+        self._deferred_callback = util.DeferredCallback(self.handle_set_zone_callback)
 
         datagram = io.NetworkDatagram()
         datagram.add_header(avatar_id, self.channel,
@@ -1260,24 +1302,104 @@ class Client(io.NetworkHandler):
         datagram.add_uint32(zone_id)
         self.network.handle_send_connection_datagram(datagram)
 
-    def handle_set_zone_resp(self, di):
-        old_zone_id = di.get_uint32()
-        zone_id = di.get_uint32()
-        zone_change_complete = di.get_uint8()
+    def handle_set_zone_callback(self, do_id, old_parent_id, old_zone_id, new_parent_id, new_zone_id):
+        self._deferred_callback.destroy()
+        self._deferred_callback = None
+
+        # update the client's interest zones
+        self._interest_manager.remove_interest_zone(old_zone_id)
+        self._interest_manager.add_interest_zone(new_zone_id)
+
+        # send delete for all objects we've seen that were in the zone
+        # that we've just left...
+        if old_zone_id in self._seen_objects:
+            if old_zone_id != OTP_ZONE_ID_OLD_QUIET_ZONE and old_zone_id != new_zone_id:
+                seen_objects = self._seen_objects[old_zone_id]
+                for do_id in seen_objects:
+                    # we do not want to delete our owned objects...
+                    if do_id not in self._owned_objects:
+                        self.send_client_object_delete_resp(do_id)
+
+                del self._seen_objects[old_zone_id]
+
+        # request all of the objects in the zones we have interest in
+        avatar_id = self.get_avatar_id_from_connection_channel(self.channel)
+        self._deferred_callback = util.DeferredCallback(self.handle_set_zone_complete_callback,
+            old_parent_id, old_zone_id, new_parent_id, new_zone_id)
 
         datagram = io.NetworkDatagram()
-        if not old_zone_id or (zone_id != OTP_ZONE_ID_OLD_QUIET_ZONE and zone_change_complete):
-            datagram.add_uint16(types.CLIENT_DONE_SET_ZONE_RESP)
-        else:
-            datagram.add_uint16(types.CLIENT_GET_STATE_RESP)
+        datagram.add_header(avatar_id, self.channel,
+            types.STATESERVER_OBJECT_GET_ZONES_OBJECTS)
 
-            # TODO: disney must have sent a few values to indicate the zone
-            # and parent of the object, i'm not too sure what these values
-            # we're; as the client doesn't even use them...
-            datagram.pad_bytes(12)
+        # pack the interest zones
+        interest_zones = list(self._interest_manager.interest_zones)
+        datagram.add_uint16(len(interest_zones))
+        for interest_zone in interest_zones:
+            datagram.add_uint32(interest_zone)
 
+        self.network.handle_send_connection_datagram(datagram)
+
+    def handle_object_location_ack(self, di):
+        do_id = di.get_uint32()
+
+        old_parent_id = di.get_uint32()
+        old_zone_id = di.get_uint32()
+
+        new_parent_id = di.get_uint32()
+        new_zone_id = di.get_uint32()
+
+        if self._deferred_callback:
+            self._deferred_callback.callback(do_id, old_parent_id, old_zone_id, new_parent_id, new_zone_id)
+
+    def handle_object_get_zones_objects_resp(self, di):
+        do_id = di.get_uint64()
+        num_objects = di.get_uint16()
+        for _ in xrange(num_objects):
+            self._pending_objects.append(di.get_uint64())
+
+        if self._deferred_callback:
+            self._deferred_callback.callback(False)
+
+    def send_client_done_set_zone_resp(self, zone_id):
+        datagram = io.NetworkDatagram()
+        datagram.add_uint16(types.CLIENT_DONE_SET_ZONE_RESP)
         datagram.add_uint16(zone_id)
         self.handle_send_datagram(datagram)
+
+    def send_client_get_state_resp(self, zone_id):
+        datagram = io.NetworkDatagram()
+        datagram.add_uint16(types.CLIENT_GET_STATE_RESP)
+        datagram.pad_bytes(12)
+        datagram.add_uint16(zone_id)
+        self.handle_send_datagram(datagram)
+
+    def handle_send_quiet_zone_resp(self, old_zone_id, new_zone_id):
+        if not old_zone_id:
+            self.send_client_done_set_zone_resp(new_zone_id)
+        else:
+            self.send_client_get_state_resp(new_zone_id)
+
+        if old_zone_id and new_zone_id != OTP_ZONE_ID_OLD_QUIET_ZONE:
+            self.send_client_done_set_zone_resp(new_zone_id)
+
+    def handle_send_zone_resp(self, complete, old_zone_id, new_zone_id):
+        if not complete:
+            if not old_zone_id:
+                self.send_client_done_set_zone_resp(new_zone_id)
+            else:
+                self.send_client_get_state_resp(new_zone_id)
+
+        if old_zone_id and new_zone_id != OTP_ZONE_ID_OLD_QUIET_ZONE and complete:
+            self.send_client_done_set_zone_resp(new_zone_id)
+
+    def handle_set_zone_complete_callback(self, complete, old_parent_id, old_zone_id, new_parent_id, new_zone_id):
+        if new_zone_id == OTP_ZONE_ID_OLD_QUIET_ZONE:
+            if not complete:
+                return
+
+            self.handle_send_quiet_zone_resp(old_zone_id, new_zone_id)
+        else:
+            self.handle_send_zone_resp(complete, old_zone_id, new_zone_id)
 
     def handle_object_enter_owner(self, has_other, di):
         do_id = di.get_uint64()
@@ -1292,6 +1414,8 @@ class Client(io.NetworkHandler):
         datagram.append_data(di.get_remaining_bytes())
         self.handle_send_datagram(datagram)
 
+        self._owned_objects.append(do_id)
+
     def handle_object_enter_location(self, has_other, di):
         do_id = di.get_uint64()
         parent_id = di.get_uint64()
@@ -1299,7 +1423,6 @@ class Client(io.NetworkHandler):
         dc_id = di.get_uint16()
 
         datagram = io.NetworkDatagram()
-
         if not has_other:
             datagram.add_uint16(types.CLIENT_CREATE_OBJECT_REQUIRED)
         else:
@@ -1310,13 +1433,30 @@ class Client(io.NetworkHandler):
         datagram.append_data(di.get_remaining_bytes())
         self.handle_send_datagram(datagram)
 
-    def handle_object_delete_ram(self, di):
-        do_id = di.get_uint32()
+        seen_objects = self._seen_objects.setdefault(zone_id, [])
+        seen_objects.append(do_id)
 
+        # check to see if we have a pending interest handle that is looking
+        # to see when this object generate has arrived.
+        if do_id in self._pending_objects:
+            self._pending_objects.remove(do_id)
+
+            # finally check to see if we have no more pending
+            # objects to look for, if so then finish the interest event...
+            if len(self._pending_objects) == 0:
+                if self._deferred_callback:
+                    self._deferred_callback.callback(True)
+                    self._deferred_callback.destroy()
+                    self._deferred_callback = None
+
+    def send_client_object_delete_resp(self, do_id):
         datagram = io.NetworkDatagram()
         datagram.add_uint16(types.CLIENT_OBJECT_DELETE_RESP)
         datagram.add_uint32(do_id)
         self.handle_send_datagram(datagram)
+
+    def handle_object_delete_ram(self, di):
+        self.send_client_object_delete_resp(di.get_uint32())
 
     def handle_object_update_field(self, di):
         try:
@@ -1403,8 +1543,8 @@ class ClientAgent(io.NetworkListener, io.NetworkConnector):
     def handle_datagram(self, channel, sender, message_type, di):
         handler = self.get_handler_from_channel(channel)
         if not handler:
-            self.notify.debug('Cannot handle message type: %d for unknown channel: %d!' % (
-                message_type, channel))
+            self.notify.debug('Cannot handle message type: %d '
+                'for unknown channel: %d!' % (message_type, channel))
 
             return
 

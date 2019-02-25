@@ -6,6 +6,7 @@
 """
 
 import collections
+import itertools
 
 from panda3d.direct import *
 
@@ -81,8 +82,6 @@ class StateObject(object):
         self._other_fields = {}
 
         self._zone_objects = {}
-
-        self._deferred_callback = None
 
         field_packer = DCPacker()
         field_packer.set_unpack_data(di.get_remaining_bytes())
@@ -212,6 +211,27 @@ class StateObject(object):
 
         return None
 
+    def get_zone_objects(self, zone_id):
+        if zone_id not in self._zone_objects:
+            return []
+
+        zone_objects = []
+        for do_id in list(self._zone_objects[zone_id]):
+            zone_object = self._network.object_manager.get_object(do_id)
+            if not zone_object:
+                continue
+
+            zone_objects.append(zone_object)
+
+        return zone_objects
+
+    def get_zones_objects(self, zone_ids):
+        zone_objects = []
+        for zone_id in zone_ids:
+            zone_objects.extend(self.get_zone_objects(zone_id))
+
+        return zone_objects
+
     def append_required_data(self, datagram, broadcast_only=True):
         sorted_fields = collections.OrderedDict(sorted(
             self._required_fields.items()))
@@ -248,18 +268,6 @@ class StateObject(object):
         datagram.add_uint16(len(self._other_fields))
         datagram.append_data(field_packer.get_string())
 
-    def get_in_street_branch(self, zone_id=None):
-        if not zone_id:
-            zone_id = self._zone_id
-
-        if not ZoneUtil.isPlayground(zone_id):
-            where = ZoneUtil.getWhereName(zone_id, True)
-
-            if where == 'street':
-                return True
-
-        return False
-
     def setup(self):
         self.object_manager.handle_changing_location(self)
 
@@ -271,12 +279,11 @@ class StateObject(object):
         elif message_type == types.STATESERVER_OBJECT_SET_ZONE:
             self.handle_set_zone(sender, di)
         elif message_type == types.STATESERVER_OBJECT_CHANGING_LOCATION:
-            self.handle_changing_location(sender, di)
-        elif message_type == types.STATESERVER_OBJECT_LOCATION_ACK:
-            # if we have a callback pending to be called when the location
-            # has been successfully approved, then call it and clear it...
-            if self._deferred_callback:
-                self._deferred_callback.callback()
+            self.handle_changing_location(di.get_uint32(), di.get_uint32(), di.get_uint32())
+        elif message_type == types.STATESERVER_OBJECT_SET_LOCATION:
+            self.handle_set_location(sender, di)
+        elif message_type == types.STATESERVER_OBJECT_GET_ZONES_OBJECTS:
+            self.handle_get_zones_objects(sender, di)
         else:
             self.notify.warning('Received unknown message type: %d '
                 'for object %d!' % (message_type, self._do_id))
@@ -316,17 +323,11 @@ class StateObject(object):
     def handle_set_owner(self, sender, di):
         new_owner_id = di.get_uint64()
         if new_owner_id == self._owner_id:
-            self.notify.warning('Failed to set new owner: %d for object %d, '
-                'object did not change owners!' % (new_owner_id, self._do_id))
-
             return
 
         self.owner_id = new_owner_id
-        if self._old_owner_id:
-            self.handle_send_changing_owner(self._old_owner_id, self._old_owner_id, self._owner_id)
-
-        if self._owner_id:
-            self.handle_send_owner_entry(self._owner_id)
+        self.handle_send_owner_entry(self._owner_id)
+        self.handle_send_changing_owner(self._old_owner_id, self._old_owner_id, self._owner_id)
 
     def handle_send_changing_ai(self, channel):
         datagram = io.NetworkDatagram()
@@ -358,19 +359,9 @@ class StateObject(object):
 
         self._network.handle_send_connection_datagram(datagram)
 
-    def handle_set_ai_callback(self, sender):
-        datagram = io.NetworkDatagram()
-        datagram.add_header(sender, self._do_id,
-            types.STATESERVER_OBJECT_SET_AI_RESP)
-
-        self._network.handle_send_connection_datagram(datagram)
-
     def handle_set_ai(self, sender, di):
         new_ai_channel = di.get_uint64()
         if new_ai_channel == self._ai_channel:
-            self.notify.debug('Failed to set new AI: %d for object %d, '
-                'object did not change AI\'s!' % (new_ai_channel, self._do_id))
-
             return
 
         shard = self._network.shard_manager.get_shard(new_ai_channel)
@@ -381,28 +372,12 @@ class StateObject(object):
             return
 
         self.ai_channel = new_ai_channel
-        if self._old_ai_channel != new_ai_channel:
-            self.handle_send_changing_ai(self.old_ai_channel)
-
-        # tell the new AI that we are being moved to their channel,
-        # and that we are now present on their channel...
-        self.handle_send_ai_entry(self._ai_channel)
-
-        # the client can send set ai for it's owned object,
-        # it will expect a response from us...
         if self._owner_id:
             self.parent_id = shard.district_id
 
-            # setup a deferred callback object that's called back when
-            # the changing location response is received...
-            self._deferred_callback = util.DeferredCallback(self.ai_change_callback)
-
+        self.handle_send_ai_entry(self._ai_channel)
+        self.handle_send_changing_ai(self.old_ai_channel)
         self.object_manager.handle_changing_location(self)
-
-    def ai_change_callback(self):
-        self.handle_set_ai_callback(self._owner_id)
-        self._deferred_callback.destroy()
-        self._deferred_callback = None
 
     def handle_send_changing_location(self, channel):
         datagram = io.NetworkDatagram()
@@ -414,34 +389,11 @@ class StateObject(object):
         datagram.add_uint32(self._zone_id)
         self._network.handle_send_connection_datagram(datagram)
 
-    def handle_send_set_zone_callback(self, channel, old_zone_id, new_zone_id, zone_change_complete=False):
-        datagram = io.NetworkDatagram()
-        datagram.add_header(channel, self._do_id,
-            types.STATESERVER_OBJECT_SET_ZONE_RESP)
-
-        datagram.add_uint32(old_zone_id)
-        datagram.add_uint32(new_zone_id)
-        datagram.add_uint8(zone_change_complete)
-        self._network.handle_send_connection_datagram(datagram)
-
     def handle_set_zone(self, sender, di):
-        self.zone_id = di.get_uint32()
-
-        if self._owner_id:
-            # setup a deferred callback object that's called back when
-            # the changing location response is received...
-            self._deferred_callback = util.DeferredCallback(self.zone_change_callback)
-            self.handle_send_set_zone_callback(self._owner_id, self._old_zone_id, self._zone_id)
-
-        self.object_manager.handle_changing_location(self)
+        new_zone_id = di.get_uint32()
+        self.zone_id = new_zone_id
         self.handle_send_changing_location(self._ai_channel)
-
-    def zone_change_callback(self):
-        self.handle_send_set_zone_callback(self._owner_id, self._old_zone_id, self._zone_id,
-            zone_change_complete=True)
-
-        self._deferred_callback.destroy()
-        self._deferred_callback = None
+        self.object_manager.handle_changing_location(self)
 
     def handle_send_location_entry(self, channel):
         datagram = io.NetworkDatagram()
@@ -471,117 +423,105 @@ class StateObject(object):
         datagram.add_uint32(self._do_id)
         self._network.handle_send_connection_datagram(datagram)
 
-    def broadcast_object_entry_in_zone(self, child_object, zone_id):
-        assert(child_object != None)
-        zone_objects = self._zone_objects.get(zone_id, [])
-        for do_id in zone_objects:
-            state_object = self.object_manager.get_object(do_id)
-            if not state_object:
-                continue
+    def handle_send_object_location_ack(self, channel):
+        datagram = io.NetworkDatagram()
+        datagram.add_header(channel, self._do_id,
+            types.STATESERVER_OBJECT_LOCATION_ACK)
 
-            if not state_object.owner_id:
-                continue
+        datagram.add_uint32(self._do_id)
+        datagram.add_uint32(self._old_parent_id)
+        datagram.add_uint32(self._old_zone_id)
+        datagram.add_uint32(self._parent_id)
+        datagram.add_uint32(self._zone_id)
+        self._network.handle_send_connection_datagram(datagram)
 
-            child_object.handle_send_location_entry(state_object.owner_id)
-
-    def broadcast_object_departure_in_zone(self, child_object, zone_id):
-        assert(child_object != None)
-        zone_objects = self._zone_objects.get(zone_id, [])
-        for do_id in zone_objects:
-            state_object = self.object_manager.get_object(do_id)
-            if not state_object:
-                continue
-
-            if not state_object.owner_id:
-                continue
-
-            child_object.handle_send_departure(state_object.owner_id)
-
-    def broadcast_objects_to_owner_in_zone(self, child_object, zone_id):
-        assert(child_object != None)
-        assert(child_object.owner_id != 0)
-        zone_objects = self._zone_objects.get(zone_id, [])
-        for do_id in zone_objects:
-            state_object = self.object_manager.get_object(do_id)
-            if not state_object:
-                continue
-
-            if state_object.do_id == child_object.do_id:
-                continue
-
-            state_object.handle_send_location_entry(child_object.owner_id)
-
-    def broadcast_update_to_owners_in_zone(self, child_object, zone_id, sender, field, field_args, excludes=[]):
-        assert(child_object != None)
-        zone_objects = self._zone_objects.get(zone_id, [])
-        for do_id in zone_objects:
-            state_object = self.object_manager.get_object(do_id)
-            if not state_object:
-                continue
-
-            if state_object.do_id in excludes:
-                continue
-
-            if not state_object.owner_id:
-                continue
-
-            child_object.handle_send_update_field(state_object.owner_id, sender, field, field_args)
-
-    def handle_changing_location(self, sender, di):
-        child_do_id = di.get_uint32()
-        new_parent_id = di.get_uint32()
-        new_zone_id = di.get_uint32()
-
+    def handle_changing_location(self, child_do_id, new_parent_id, new_zone_id):
         # retrieve this object from it's do_id, if we cannot find this object in the do_id to do
-        # dictionary, then this is an invalid object.
+        # dictionary, then this is an invalid object...
         child_object = self.object_manager.get_object(child_do_id)
         if not child_object:
-            self.notify.debug('Cannot handle changing locations for object: %d, '
-                'object does not exist on the state server!' % child_do_id)
-
             return
 
-        # check to see if we have this child in our list of children to zones,
-        # if so, check to see if the zone has changed locations from where it was previously,
-        # and if they have indeed changed locations, then either remove them or update their location...
+        send_location_entry = False
+        send_location_departure = False
         if self.has_child(child_object.do_id):
             child_zone_id = self.get_zone_from_child(child_object.do_id)
             if new_parent_id != self._do_id:
-                # remove the child from their previous zone
                 self.remove_child_from_zone(child_object.do_id, child_zone_id)
-                self.broadcast_object_departure_in_zone(child_object, child_zone_id)
+                send_location_departure = True
             elif new_zone_id != child_zone_id:
-                # remove the child from their previous zone
                 self.remove_child_from_zone(child_object.do_id, child_zone_id)
-                self.broadcast_object_departure_in_zone(child_object, child_zone_id)
-
-                # add the child to their new zone
-                self.broadcast_object_entry_in_zone(child_object, new_zone_id)
                 self.add_child_in_zone(child_object.do_id, new_zone_id)
-
-                # send the child object all of the objects that are in the new zone
-                if child_object.owner_id:
-                    self.broadcast_objects_to_owner_in_zone(child_object, new_zone_id)
+                send_location_entry = True
+                send_location_departure = True
         else:
-            # ensure the parent id specified is infact our do id
             assert(new_parent_id == self._do_id)
-
-            # add the child to their new zone
-            self.broadcast_object_entry_in_zone(child_object, new_zone_id)
             self.add_child_in_zone(child_object.do_id, new_zone_id)
+            send_location_entry = True
 
-            # send the child object all of the objects that are in the new zone
-            if child_object.owner_id:
-                self.broadcast_objects_to_owner_in_zone(child_object, new_zone_id)
+        # if this object is entering the new zone, then relay a location
+        # generate to everyone in the new zone.
+        if send_location_entry:
+            for zone_object in itertools.ifilter(lambda x: x.owner_id > 0, self.get_zone_objects(new_zone_id)):
+                child_object.handle_send_location_entry(zone_object.owner_id)
 
-        # tell the sender that we acknowledge that they've changed locations
+        # also send a departure to everyone in the object's old zone...
+        if send_location_departure:
+            for zone_object in itertools.ifilter(lambda x: x.owner_id > 0, self.get_zone_objects(child_zone_id)):
+                child_object.handle_send_departure(zone_object.owner_id)
+
+        # acknowledge the object's location change was successful.
+        if child_object.owner_id:
+            child_object.handle_send_object_location_ack(child_object.owner_id)
+
+    def handle_set_location(self, sender, di):
+        new_parent_id = di.get_uint32()
+        new_zone_id = di.get_uint32()
+        if new_parent_id == self._parent_id and new_zone_id == self._zone_id:
+            return
+
+        self.parent_id = new_parent_id
+        self.zone_id = new_zone_id
+
+        self.handle_changing_location(self._zone_id, new_parent_id, new_zone_id)
+
+    def handle_get_zones_objects(self, sender, di):
+        zone_ids = [di.get_uint32() for _ in xrange(di.get_uint16())]
+        if not self._owner_id:
+            self.notify.warning('Cannot get zone objects for object: %d, '
+                'object does not have an owner!' % self._do_id)
+
+            return
+
+        parent_object = self._network.object_manager.get_object(self._parent_id)
+        if not parent_object:
+            self.notify.warning('Cannot get zone objects for object: %d, '
+                'object has no parent!' % self._do_id)
+
+            return
+
+        # filter out our own object from the zone list, as we do not want
+        # to send our own object because we have reference to it locally...
+        zone_objects = list(itertools.ifilter(lambda x: x.do_id != self._do_id,
+            parent_object.get_zones_objects(zone_ids)))
+
+        # tell the Client Agent that the they should expect this
+        # many objects to have been generated before completing the zone change...
         datagram = io.NetworkDatagram()
-        datagram.add_header(child_object.do_id, self._do_id,
-            types.STATESERVER_OBJECT_LOCATION_ACK)
+        datagram.add_header(self._owner_id, self._do_id,
+            types.STATESERVER_OBJECT_GET_ZONES_OBJECTS_RESP)
 
-        datagram.add_uint32(new_parent_id)
-        datagram.add_uint32(new_zone_id)
+        datagram.add_uint64(self._do_id)
+        datagram.add_uint16(len(zone_objects))
+        for zone_object in zone_objects:
+            datagram.add_uint64(zone_object.do_id)
+
         self._network.handle_send_connection_datagram(datagram)
+
+        # finally once we've sent the objects we expect the client,
+        # to see before completing the interest change, start sending object generates...
+        for zone_object in zone_objects:
+            zone_object.handle_send_location_entry(self._owner_id)
 
     def handle_send_update_field(self, channel, sender, field, field_args):
         datagram = io.NetworkDatagram()
@@ -740,10 +680,7 @@ class StateObject(object):
         self.parent_id = 0
         self.zone_id = 0
 
-        # kill our object on it's AI channel...
         self.handle_send_departure(self._ai_channel)
-
-        # release our object's interests
         self.object_manager.handle_changing_location(self)
 
 
@@ -800,9 +737,12 @@ class StateObjectManager(object):
 
             return
 
-        if parent_object.has_child(state_object.do_id):
-            child_zone_id = parent_object.get_zone_from_child(state_object.do_id)
-            parent_object.broadcast_update_to_owners_in_zone(state_object, child_zone_id, sender, field, field_args, excludes)
+        if not parent_object.has_child(state_object.do_id):
+            return
+
+        child_zone_id = parent_object.get_zone_from_child(state_object.do_id)
+        for zone_object in itertools.ifilter(lambda x: x.owner_id > 0 and x.do_id not in excludes, parent_object.get_zone_objects(child_zone_id)):
+            state_object.handle_send_update_field(zone_object.owner_id, state_object.do_id, field, field_args)
 
 
 class StateServer(io.NetworkConnector):
@@ -936,12 +876,10 @@ class StateServer(io.NetworkConnector):
 
             return
 
-        state_object = StateObject(self, self.object_manager, do_id, parent_id, zone_id,
-            dc_class, has_other, di)
+        state_object = StateObject(self, self.object_manager, do_id, parent_id,
+            zone_id, dc_class, has_other, di)
 
-        # TODO FIXME: find a better way to do this!!!
-        # set the state object's AI channel only if the AI it's self
-        # actually sent this generate message for this object...
+        # TODO FIXME: find a better way to do this...
         if self.shard_manager.has_shard(sender):
             state_object.ai_channel = sender
 
@@ -950,12 +888,16 @@ class StateServer(io.NetworkConnector):
     def handle_object_update_field(self, channel, sender, di):
         do_id = di.get_uint32()
         if not di.get_remaining_size():
-            self.notify.warning('Cannot handle an field update for object: %d, truncated datagram!' % do_id)
+            self.notify.warning('Cannot handle an field update for object: %d, '
+                'truncated datagram!' % do_id)
+
             return
 
         state_object = self.object_manager.get_object(do_id)
         if not state_object:
-            self.notify.debug('Cannot handle an field update for object: %d, unknown object!' % do_id)
+            self.notify.debug('Cannot handle an field update for object: %d, '
+                'unknown object!' % do_id)
+
             return
 
         state_object.handle_update_field(channel, sender, di)
