@@ -677,11 +677,21 @@ class StateObject(object):
                     self.handle_send_save_field(field, field_args)
 
     def destroy(self):
+        self.owner_id = 0
         self.parent_id = 0
         self.zone_id = 0
 
+        # manually clear the object's interest and the object's
+        # existance on an AI if it exists on one...
         self.handle_send_departure(self._ai_channel)
-        self.object_manager.handle_changing_location(self)
+        parent_object = self._network.object_manager.get_object(self._old_parent_id)
+        if parent_object is not None:
+            parent_object.handle_changing_location(self._do_id, self._parent_id, self._zone_id)
+
+        self._required_fields = {}
+        self._other_fields = {}
+
+        self._zone_objects = {}
 
 
 class StateObjectManager(object):
