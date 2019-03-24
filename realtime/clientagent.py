@@ -875,11 +875,6 @@ class InterestManager(object):
         if zone_id not in self._interest_zones:
             return
 
-        # we never remove interest in the quiet zone as the client
-        # should always have the quiet zone objects...
-        if zone_id == OTP_ZONE_ID_OLD_QUIET_ZONE:
-            return
-
         self._interest_zones.remove(zone_id)
 
     def clear(self):
@@ -1512,7 +1507,7 @@ class Client(io.NetworkHandler):
 
         # check to see if we either have seen this object's generate already,
         # or that the object is one of our owned objects...
-        can_send_update = self.has_seen_object(do_id) or do_id in self._owned_objects
+        can_send_update = self.has_seen_object(do_id) or do_id in self._pending_objects or do_id in self._owned_objects
         if not can_send_update:
             return
 
