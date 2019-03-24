@@ -309,11 +309,6 @@ class MessageInterface(object):
             message_handle.destroy()
             del message_handle
 
-        # reverse the message handles in the queue in attempt
-        # to handle sooner expiring messages so we don't miss any messages
-        # due to them expiring right before we can handle them...
-        self._messages.reverse()
-
         return task.cont
 
     def flush_post_handles(self, channel):
