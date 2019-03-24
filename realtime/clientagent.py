@@ -909,6 +909,13 @@ class Client(io.NetworkHandler):
     def authenticated(self, authenticated):
         self._authenticated = authenticated
 
+    def has_seen_object(self, do_id):
+        for zone_id, seen_objects in list(self._seen_objects.items()):
+            if do_id in seen_objects:
+                return True
+
+        return False
+
     def startup(self):
         io.NetworkHandler.startup(self)
 
@@ -1422,6 +1429,16 @@ class Client(io.NetworkHandler):
         zone_id = di.get_uint32()
         dc_id = di.get_uint16()
 
+        # check to see if we have interest in this object's zone, and if we
+        # do then we can safely send generate for the object...
+        if not self._interest_manager.has_interest_zone(zone_id):
+            return
+
+        # if the object is in the list of owned objects, we do not want to
+        # generate this object, as it was already generated elsewhere...
+        if do_id in self._owned_objects:
+            return
+
         datagram = io.NetworkDatagram()
         if not has_other:
             datagram.add_uint16(types.CLIENT_CREATE_OBJECT_REQUIRED)
@@ -1450,6 +1467,16 @@ class Client(io.NetworkHandler):
                     self._deferred_callback = None
 
     def send_client_object_delete_resp(self, do_id):
+        # if the object is in the list of owned objects, we do not want to
+        # delete this object, as it was already generated elsewhere...
+        if do_id in self._owned_objects:
+            return
+
+        # only delete the object if we've previously seen the objects
+        # generate request sent by the StateServer...
+        if not self.has_seen_object(do_id):
+            return
+
         datagram = io.NetworkDatagram()
         datagram.add_uint16(types.CLIENT_OBJECT_DELETE_RESP)
         datagram.add_uint32(do_id)
@@ -1482,6 +1509,12 @@ class Client(io.NetworkHandler):
     def handle_object_update_field_resp(self, di):
         do_id = di.get_uint32()
         field_id = di.get_uint16()
+
+        # check to see if we either have seen this object's generate already,
+        # or that the object is one of our owned objects...
+        can_send_update = self.has_seen_object(do_id) or do_id in self._owned_objects
+        if not can_send_update:
+            return
 
         datagram = io.NetworkDatagram()
         datagram.add_uint16(types.CLIENT_OBJECT_UPDATE_FIELD_RESP)

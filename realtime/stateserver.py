@@ -225,6 +225,13 @@ class StateObject(object):
 
         return zone_objects
 
+    def get_all_zone_objects(self):
+        zone_objects = []
+        for zone_id in list(self._zone_objects):
+            zone_objects.extend(self.get_zone_objects(zone_id))
+
+        return zone_objects
+
     def get_zones_objects(self, zone_ids):
         zone_objects = []
         for zone_id in zone_ids:
@@ -462,12 +469,12 @@ class StateObject(object):
         # if this object is entering the new zone, then relay a location
         # generate to everyone in the new zone.
         if send_location_entry:
-            for zone_object in itertools.ifilter(lambda x: x.owner_id > 0, self.get_zone_objects(new_zone_id)):
+            for zone_object in itertools.ifilter(lambda x: x.owner_id > 0, self.get_all_zone_objects()):
                 child_object.handle_send_location_entry(zone_object.owner_id)
 
         # also send a departure to everyone in the object's old zone...
         if send_location_departure:
-            for zone_object in itertools.ifilter(lambda x: x.owner_id > 0, self.get_zone_objects(child_zone_id)):
+            for zone_object in itertools.ifilter(lambda x: x.owner_id > 0, self.get_all_zone_objects()):
                 child_object.handle_send_departure(zone_object.owner_id)
 
         # acknowledge the object's location change was successful.
@@ -751,7 +758,7 @@ class StateObjectManager(object):
             return
 
         child_zone_id = parent_object.get_zone_from_child(state_object.do_id)
-        for zone_object in itertools.ifilter(lambda x: x.owner_id > 0 and x.do_id not in excludes, parent_object.get_zone_objects(child_zone_id)):
+        for zone_object in itertools.ifilter(lambda x: x.owner_id > 0 and x.do_id not in excludes, parent_object.get_all_zone_objects()):
             state_object.handle_send_update_field(zone_object.owner_id, state_object.do_id, field, field_args)
 
 
