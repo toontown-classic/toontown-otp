@@ -212,10 +212,18 @@ class MessageInterface(object):
         #
         #    return
 
-        message_handle = MessageHandle(channel, sender, message_type,
-            datagram, self.get_timestamp())
+        message_handle = MessageHandle(channel, sender, message_type, datagram, self.get_timestamp())
+        if not self._network.interface.has_participant(channel):
+            self._messages.append(message_handle)
+        else:
+            # in this case, we have a receiver and there's no reason to not
+            # route the message right now, in other cases that we have no receiver;
+            # we want to queue those messages until they are sent or expire...
+            participant = self._network.interface.get_participant(message_handle.channel)
+            if not participant:
+                return
 
-        self._messages.append(message_handle)
+            self.route_datagram(message_handle, participant)
 
     def remove_handle(self, message_handle):
         if not isinstance(message_handle, MessageHandle):
@@ -254,8 +262,29 @@ class MessageInterface(object):
         del self._post_messages[channel]
 
     def setup(self):
-        self.__flush_task = task_mgr.add(self.__flush,
-            self._network.get_unique_name('flush-queue'))
+        self.__flush_task = task_mgr.add(self.__flush, self._network.get_unique_name('flush-queue'))
+
+    def route_datagram(self, message_handle, participant):
+        assert(message_handle != None)
+
+        datagram = io.NetworkDatagram()
+        datagram.add_header(message_handle.channel, message_handle.sender,
+            message_handle.message_type)
+
+        other_datagram = message_handle.datagram
+        datagram.append_data(other_datagram.get_message())
+        participant.handle_send_datagram(datagram)
+
+        # destroy the datagram and message handle objects since they are
+        # no longer needed in this scope...
+        other_datagram.clear()
+        datagram.clear()
+
+        del other_datagram
+        del datagram
+
+        message_handle.destroy()
+        del message_handle
 
     def __flush(self, task):
         # check to see if we have any available messages in the
@@ -267,6 +296,7 @@ class MessageInterface(object):
             # pull a message handle object off the top of the queue,
             # then attempt to route it to its appropiate channel...
             message_handle = self._messages.popleft()
+            assert(message_handle != None)
 
             # before we can attempt to route this message, we need to check and
             # see if the channel exists on the participant interface...
@@ -284,30 +314,10 @@ class MessageInterface(object):
 
             # we've successfully found the channel in which this message will be routed to,
             # and have a valid message, now reconstruct the message and send it off...
-            participant = self._network.interface.get_participant(
-                message_handle.channel)
+            participant = self._network.interface.get_participant(message_handle.channel)
+            assert(participant != None)
 
-            if not participant:
-                continue
-
-            datagram = io.NetworkDatagram()
-            datagram.add_header(message_handle.channel, message_handle.sender,
-                message_handle.message_type)
-
-            other_datagram = message_handle.datagram
-            datagram.append_data(other_datagram.get_message())
-            participant.handle_send_datagram(datagram)
-
-            # destroy the datagram and message handle objects since they are
-            # no longer needed in this scope...
-            other_datagram.clear()
-            datagram.clear()
-
-            del other_datagram
-            del datagram
-
-            message_handle.destroy()
-            del message_handle
+            self.route_datagram(message_handle, participant)
 
         return task.cont
 
