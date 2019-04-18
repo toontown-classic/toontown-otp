@@ -515,7 +515,7 @@ class StateObject(object):
 
         # filter out our own object from the zone list, as we do not want
         # to send our own object because we have reference to it locally...
-        zone_objects = list(itertools.ifilter(lambda x: x.do_id != self._do_id,
+        zone_objects = list(itertools.ifilter(lambda x: x.do_id != self._do_id and x.owner_id != self._owner_id,
             parent_object.get_zones_objects(zone_ids)))
 
         # tell the Client Agent that the they should expect this
