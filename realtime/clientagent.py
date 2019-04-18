@@ -1312,10 +1312,16 @@ class Client(io.NetworkHandler):
         self._interest_manager.remove_interest_zone(old_zone_id)
         self._interest_manager.add_interest_zone(new_zone_id)
 
+        # add interest in our quiet zone, as the quiet zone objects need
+        # to be regenerated once we leave the quiet zone; this is because the client
+        # always deletes it's objects in the previous zones unless they have "OTHER" fields...
+        if new_zone_id != OTP_ZONE_ID_OLD_QUIET_ZONE:
+            self._interest_manager.add_interest_zone(OTP_ZONE_ID_OLD_QUIET_ZONE)
+
         # send delete for all objects we've seen that were in the zone
         # that we've just left...
         if old_zone_id in self._seen_objects:
-            if old_zone_id != OTP_ZONE_ID_OLD_QUIET_ZONE and old_zone_id != new_zone_id:
+            if old_zone_id != new_zone_id:
                 seen_objects = self._seen_objects[old_zone_id]
                 for do_id in seen_objects:
                     # we do not want to delete our owned objects...
@@ -1432,6 +1438,14 @@ class Client(io.NetworkHandler):
         # if the object is in the list of owned objects, we do not want to
         # generate this object, as it was already generated elsewhere...
         if do_id in self._owned_objects:
+            return
+
+        dclass = self.network.dc_loader.dclasses_by_number[dc_id]
+        assert(dclass != None)
+
+        # if there is a generate for the toon and it's zone is the quiet zone,
+        # then we never allow that generate through...
+        if dclass.get_name() == 'DistributedToon' and zone_id == OTP_ZONE_ID_OLD_QUIET_ZONE:
             return
 
         datagram = io.NetworkDatagram()

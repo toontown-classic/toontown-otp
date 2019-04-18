@@ -449,8 +449,9 @@ class StateObject(object):
         if not child_object:
             return
 
-        send_location_entry = False
         send_location_departure = False
+        send_location_entry = False
+        child_zone_id = 0
         if self.has_child(child_object.do_id):
             child_zone_id = self.get_zone_from_child(child_object.do_id)
             if new_parent_id != self._do_id:
@@ -459,23 +460,28 @@ class StateObject(object):
             elif new_zone_id != child_zone_id:
                 self.remove_child_from_zone(child_object.do_id, child_zone_id)
                 self.add_child_in_zone(child_object.do_id, new_zone_id)
-                send_location_entry = True
                 send_location_departure = True
+                send_location_entry = True
         else:
             assert(new_parent_id == self._do_id)
             self.add_child_in_zone(child_object.do_id, new_zone_id)
             send_location_entry = True
 
+        # also send a departure to everyone in the object's old zone...
+        if send_location_departure:
+            old_parent_object = self.object_manager.get_object(child_object.old_parent_id)
+            if old_parent_object is not None:
+                for zone_object in itertools.ifilter(lambda x: x.owner_id > 0 and x.owner_id != child_object.owner_id, old_parent_object.get_all_zone_objects()):
+                    child_object.handle_send_departure(zone_object.owner_id)
+            elif new_zone_id != child_zone_id:
+                for zone_object in itertools.ifilter(lambda x: x.owner_id > 0 and x.owner_id != child_object.owner_id, self.get_all_zone_objects()):
+                    child_object.handle_send_departure(zone_object.owner_id)
+
         # if this object is entering the new zone, then relay a location
         # generate to everyone in the new zone.
         if send_location_entry:
-            for zone_object in itertools.ifilter(lambda x: x.owner_id > 0, self.get_all_zone_objects()):
+            for zone_object in itertools.ifilter(lambda x: x.owner_id > 0 and x.owner_id != child_object.owner_id, self.get_all_zone_objects()):
                 child_object.handle_send_location_entry(zone_object.owner_id)
-
-        # also send a departure to everyone in the object's old zone...
-        if send_location_departure:
-            for zone_object in itertools.ifilter(lambda x: x.owner_id > 0, self.get_all_zone_objects()):
-                child_object.handle_send_departure(zone_object.owner_id)
 
         # acknowledge the object's location change was successful.
         if child_object.owner_id:
