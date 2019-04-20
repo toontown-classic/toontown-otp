@@ -23,6 +23,7 @@ from realtime.notifier import notify
 from realtime import util
 
 from game.OtpDoGlobals import *
+from game import ZoneUtil
 
 
 class ClientOperation(FSM):
@@ -890,11 +891,17 @@ class Client(io.NetworkHandler):
         self._authenticated = False
 
         self._interest_manager = InterestManager()
-        self._deferred_callback = None
+
+        self._location_deferred_callback = None
+        self._generate_deferred_callback = None
 
         self._seen_objects = {}
         self._owned_objects = []
         self._pending_objects = []
+
+        self._in_street_branch = False
+        self._branch_zone = 0
+        self._branch_interest_zones = []
 
     @property
     def authenticated(self):
@@ -1270,7 +1277,7 @@ class Client(io.NetworkHandler):
             return
 
         avatar_id = self.get_avatar_id_from_connection_channel(self.channel)
-        self._deferred_callback = util.DeferredCallback(self.handle_set_shard_callback)
+        self._location_deferred_callback = util.DeferredCallback(self.handle_set_shard_callback)
 
         datagram = io.NetworkDatagram()
         datagram.add_header(avatar_id, self.channel,
@@ -1295,7 +1302,7 @@ class Client(io.NetworkHandler):
             return
 
         avatar_id = self.get_avatar_id_from_connection_channel(self.channel)
-        self._deferred_callback = util.DeferredCallback(self.handle_set_zone_callback)
+        self._location_deferred_callback = util.DeferredCallback(self.handle_set_zone_callback)
 
         datagram = io.NetworkDatagram()
         datagram.add_header(avatar_id, self.channel,
@@ -1304,12 +1311,61 @@ class Client(io.NetworkHandler):
         datagram.add_uint32(zone_id)
         self.network.handle_send_connection_datagram(datagram)
 
+    def send_get_zones_objects(self, avatar_id, interest_zones):
+        datagram = io.NetworkDatagram()
+        datagram.add_header(avatar_id, self.channel,
+            types.STATESERVER_OBJECT_GET_ZONES_OBJECTS)
+
+        # pack the interest zones
+        datagram.add_uint16(len(interest_zones))
+        for interest_zone in interest_zones:
+            datagram.add_uint32(interest_zone)
+
+        self.network.handle_send_connection_datagram(datagram)
+
+    def get_in_street_branch(self, zone_id):
+        if not ZoneUtil.isPlayground(zone_id):
+            where = ZoneUtil.getWhereName(zone_id, True)
+            return where == 'street'
+
+        return False
+
     def handle_set_zone_callback(self, do_id, old_parent_id, old_zone_id, new_parent_id, new_zone_id):
-        self._deferred_callback.destroy()
-        self._deferred_callback = None
+        self._location_deferred_callback.destroy()
+        self._location_deferred_callback = None
 
         # update the client's interest zones
-        self._interest_manager.remove_interest_zone(old_zone_id)
+        avatar_id = self.get_avatar_id_from_connection_channel(self.channel)
+        if not self.get_in_street_branch(new_zone_id):
+            if self._in_street_branch:
+                self._interest_manager.remove_interest_zone(self._branch_zone)
+                self._branch_zone = 0
+                for zone_id in self._branch_interest_zones:
+                    self._interest_manager.remove_interest_zone(zone_id)
+
+                self._branch_interest_zones = []
+                self._in_street_branch = False
+
+            self._interest_manager.remove_interest_zone(old_zone_id)
+        else:
+            if not self._in_street_branch:
+                self._branch_zone = ZoneUtil.getBranchZone(new_zone_id)
+                self._interest_manager.add_interest_zone(self._branch_zone)
+                for zone_id in xrange(self._branch_zone + 1, self._branch_zone + 100):
+                    self._branch_interest_zones.append(zone_id)
+                    self._interest_manager.add_interest_zone(zone_id)
+
+                self._in_street_branch = True
+            else:
+                # request all of the objects in the zones we have interest in,
+                # ignore any street section zones and the street branch zone
+                interest_zones = list(self._interest_manager.interest_zones)
+                if self._in_street_branch and self._branch_zone in interest_zones:
+                    interest_zones.remove(self._branch_zone)
+
+                self.send_get_zones_objects(avatar_id, interest_zones)
+                return
+
         self._interest_manager.add_interest_zone(new_zone_id)
 
         # add interest in our quiet zone, as the quiet zone objects need
@@ -1318,8 +1374,7 @@ class Client(io.NetworkHandler):
         if new_zone_id != OTP_ZONE_ID_OLD_QUIET_ZONE:
             self._interest_manager.add_interest_zone(OTP_ZONE_ID_OLD_QUIET_ZONE)
 
-        # send delete for all objects we've seen that were in the zone
-        # that we've just left...
+        # send delete for all objects we've seen that were in the zone that we've just left...
         if old_zone_id in self._seen_objects:
             if old_zone_id != new_zone_id:
                 seen_objects = self._seen_objects[old_zone_id]
@@ -1330,22 +1385,12 @@ class Client(io.NetworkHandler):
 
                 del self._seen_objects[old_zone_id]
 
-        # request all of the objects in the zones we have interest in
-        avatar_id = self.get_avatar_id_from_connection_channel(self.channel)
-        self._deferred_callback = util.DeferredCallback(self.handle_set_zone_complete_callback,
+        self._generate_deferred_callback = util.DeferredCallback(self.handle_set_zone_complete_callback,
             old_parent_id, old_zone_id, new_parent_id, new_zone_id)
 
-        datagram = io.NetworkDatagram()
-        datagram.add_header(avatar_id, self.channel,
-            types.STATESERVER_OBJECT_GET_ZONES_OBJECTS)
-
-        # pack the interest zones
+        # request all of the objects in the zones we have interest in
         interest_zones = list(self._interest_manager.interest_zones)
-        datagram.add_uint16(len(interest_zones))
-        for interest_zone in interest_zones:
-            datagram.add_uint32(interest_zone)
-
-        self.network.handle_send_connection_datagram(datagram)
+        self.send_get_zones_objects(avatar_id, interest_zones)
 
     def handle_object_location_ack(self, di):
         do_id = di.get_uint32()
@@ -1356,17 +1401,30 @@ class Client(io.NetworkHandler):
         new_parent_id = di.get_uint32()
         new_zone_id = di.get_uint32()
 
-        if self._deferred_callback:
-            self._deferred_callback.callback(do_id, old_parent_id, old_zone_id, new_parent_id, new_zone_id)
+        if self._location_deferred_callback:
+            self._location_deferred_callback.callback(do_id, old_parent_id, old_zone_id, new_parent_id, new_zone_id)
 
     def handle_object_get_zones_objects_resp(self, di):
         do_id = di.get_uint64()
         num_objects = di.get_uint16()
         for _ in xrange(num_objects):
-            self._pending_objects.append(di.get_uint64())
+            do_id = di.get_uint64()
+            if self.has_seen_object(do_id):
+                continue
 
-        if self._deferred_callback:
-            self._deferred_callback.callback(False)
+            if do_id in self._owned_objects:
+                continue
+
+            self._pending_objects.append(do_id)
+
+        if self._generate_deferred_callback:
+            self._generate_deferred_callback.callback(False)
+
+        if len(self._pending_objects) == 0:
+            if self._generate_deferred_callback:
+                self._generate_deferred_callback.callback(True)
+                self._generate_deferred_callback.destroy()
+                self._generate_deferred_callback = None
 
     def send_client_done_set_zone_resp(self, zone_id):
         datagram = io.NetworkDatagram()
@@ -1435,6 +1493,9 @@ class Client(io.NetworkHandler):
         if not self._interest_manager.has_interest_zone(zone_id):
             return
 
+        if self.has_seen_object(do_id):
+            return
+
         # if the object is in the list of owned objects, we do not want to
         # generate this object, as it was already generated elsewhere...
         if do_id in self._owned_objects:
@@ -1470,10 +1531,10 @@ class Client(io.NetworkHandler):
             # finally check to see if we have no more pending
             # objects to look for, if so then finish the interest event...
             if len(self._pending_objects) == 0:
-                if self._deferred_callback:
-                    self._deferred_callback.callback(True)
-                    self._deferred_callback.destroy()
-                    self._deferred_callback = None
+                if self._generate_deferred_callback:
+                    self._generate_deferred_callback.callback(True)
+                    self._generate_deferred_callback.destroy()
+                    self._generate_deferred_callback = None
 
     def send_client_object_delete_resp(self, do_id):
         # if the object is in the list of owned objects, we do not want to
