@@ -1341,6 +1341,11 @@ class Client(io.NetworkHandler):
                 self._interest_manager.remove_interest_zone(self._branch_zone)
                 self._branch_zone = 0
                 for zone_id in self._branch_interest_zones:
+                    # ensure we've cleared the objects in our seen list since
+                    # we are no longer in a street branch...
+                    if zone_id in self._seen_objects:
+                        del self._seen_objects[zone_id]
+
                     self._interest_manager.remove_interest_zone(zone_id)
 
                 self._branch_interest_zones = []
