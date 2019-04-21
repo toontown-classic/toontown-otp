@@ -320,7 +320,7 @@ class MessageInterface(object):
         for _ in xrange(len(self._messages)):
             # pull a message handle object off the top of the queue,
             # then attempt to route it to its appropiate channel...
-            message_handle = self._messages.popleft()
+            message_handle = self._messages.pop()
             assert(message_handle != None)
 
             # before we can attempt to route this message, we need to check and
