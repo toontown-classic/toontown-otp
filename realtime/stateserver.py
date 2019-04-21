@@ -463,7 +463,6 @@ class StateObject(object):
                 send_location_departure = True
                 send_location_entry = True
         else:
-            assert(new_parent_id == self._do_id)
             self.add_child_in_zone(child_object.do_id, new_zone_id)
             send_location_entry = True
 
