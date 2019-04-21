@@ -918,6 +918,14 @@ class Client(io.NetworkHandler):
 
         return False
 
+    def remove_seen_object(self, do_id):
+        for zone_id, seen_objects in list(self._seen_objects.items()):
+            if do_id in seen_objects:
+                seen_objects.remove(do_id)
+
+            if len(seen_objects) == 0:
+                del self._seen_objects[zone_id]
+
     def startup(self):
         io.NetworkHandler.startup(self)
 
@@ -1014,10 +1022,12 @@ class Client(io.NetworkHandler):
             self.handle_object_enter_location(False, di)
         elif message_type == types.STATESERVER_OBJECT_ENTER_LOCATION_WITH_REQUIRED_OTHER:
             self.handle_object_enter_location(True, di)
-        elif message_type == types.STATESERVER_OBJECT_DELETE_RAM:
-            self.handle_object_delete_ram(di)
+        elif message_type == types.STATESERVER_OBJECT_CHANGING_LOCATION:
+            self.handle_object_changing_location(di)
         elif message_type == types.STATESERVER_OBJECT_UPDATE_FIELD:
             self.handle_object_update_field_resp(di)
+        elif message_type == types.STATESERVER_OBJECT_DELETE_RAM:
+            self.handle_object_delete_ram(di)
         else:
             self.network.database_interface.handle_datagram(message_type, di)
 
@@ -1356,7 +1366,7 @@ class Client(io.NetworkHandler):
             if not self._in_street_branch:
                 self._branch_zone = ZoneUtil.getBranchZone(new_zone_id)
                 self._interest_manager.add_interest_zone(self._branch_zone)
-                for zone_id in xrange(self._branch_zone + 1, self._branch_zone + 100):
+                for zone_id in xrange(self._branch_zone + 1, self._branch_zone + 50):
                     self._branch_interest_zones.append(zone_id)
                     self._interest_manager.add_interest_zone(zone_id)
 
@@ -1493,17 +1503,13 @@ class Client(io.NetworkHandler):
         zone_id = di.get_uint32()
         dc_id = di.get_uint16()
 
-        # check to see if we have interest in this object's zone, and if we
-        # do then we can safely send generate for the object...
-        if not self._interest_manager.has_interest_zone(zone_id):
-            return
-
         if self.has_seen_object(do_id):
             return
 
-        # if the object is in the list of owned objects, we do not want to
-        # generate this object, as it was already generated elsewhere...
         if do_id in self._owned_objects:
+            return
+
+        if not self._interest_manager.has_interest_zone(zone_id):
             return
 
         dclass = self.network.dc_loader.dclasses_by_number[dc_id]
@@ -1557,8 +1563,7 @@ class Client(io.NetworkHandler):
         datagram.add_uint32(do_id)
         self.handle_send_datagram(datagram)
 
-    def handle_object_delete_ram(self, di):
-        self.send_client_object_delete_resp(di.get_uint32())
+        self.remove_seen_object(do_id)
 
     def handle_object_update_field(self, di):
         try:
@@ -1581,6 +1586,22 @@ class Client(io.NetworkHandler):
         datagram.append_data(di.get_remaining_bytes())
         self.network.handle_send_connection_datagram(datagram)
 
+    def handle_object_changing_location(self, di):
+        do_id = di.get_uint32()
+        new_parent_id = di.get_uint32()
+        new_zone_id = di.get_uint32()
+
+        if not self.has_seen_object(do_id):
+            return
+
+        if do_id in self._owned_objects:
+            return
+
+        if not self._interest_manager.has_interest_zone(new_zone_id):
+            return
+
+        self.send_client_object_delete_resp(do_id)
+
     def handle_object_update_field_resp(self, di):
         do_id = di.get_uint32()
         field_id = di.get_uint16()
@@ -1597,6 +1618,10 @@ class Client(io.NetworkHandler):
         datagram.add_uint16(field_id)
         datagram.append_data(di.get_remaining_bytes())
         self.handle_send_datagram(datagram)
+
+    def handle_object_delete_ram(self, di):
+        do_id = di.get_uint32()
+        self.send_client_object_delete_resp(do_id)
 
     def shutdown(self):
         if self.network.account_manager.has_fsm(self.channel):

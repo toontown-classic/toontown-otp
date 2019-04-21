@@ -471,16 +471,16 @@ class StateObject(object):
         if send_location_departure:
             old_parent_object = self.object_manager.get_object(child_object.old_parent_id)
             if old_parent_object is not None:
-                for zone_object in itertools.ifilter(lambda x: x.owner_id > 0 and x.owner_id != child_object.owner_id, old_parent_object.get_all_zone_objects()):
+                for zone_object in itertools.ifilter(lambda x: x.owner_id > 0, old_parent_object.get_all_zone_objects()):
                     child_object.handle_send_departure(zone_object.owner_id)
             elif new_zone_id != child_zone_id:
-                for zone_object in itertools.ifilter(lambda x: x.owner_id > 0 and x.owner_id != child_object.owner_id, self.get_all_zone_objects()):
-                    child_object.handle_send_departure(zone_object.owner_id)
+                for zone_object in itertools.ifilter(lambda x: x.owner_id > 0, self.get_all_zone_objects()):
+                    child_object.handle_send_changing_location(zone_object.owner_id)
 
         # if this object is entering the new zone, then relay a location
         # generate to everyone in the new zone.
         if send_location_entry:
-            for zone_object in itertools.ifilter(lambda x: x.owner_id > 0 and x.owner_id != child_object.owner_id, self.get_all_zone_objects()):
+            for zone_object in itertools.ifilter(lambda x: x.owner_id > 0, self.get_all_zone_objects()):
                 child_object.handle_send_location_entry(zone_object.owner_id)
 
         # acknowledge the object's location change was successful.
