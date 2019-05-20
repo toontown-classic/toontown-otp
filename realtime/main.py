@@ -14,11 +14,11 @@ if os.path.exists('config/general.prc'):
     loadPrcFile('config/general.prc')
 
 from pandac.PandaModules import *
+from direct.directbase.DirectStart import *
 from direct.task.TaskManagerGlobal import taskMgr as task_mgr
 
 from realtime.notifier import notify
 
-__builtin__.config = get_config_showbase()
 __builtin__.task_mgr = task_mgr
 
 from realtime import io, types, clientagent, messagedirector, \

@@ -1,3 +1,6 @@
+# ShowBase
+window-type none
+
 # Network:
 net-max-write-queue 50000
 net-want-threads #f
