@@ -57,14 +57,14 @@ class ShardManager(object):
 class StateObject(object):
     notify = notify.new_category('StateObject')
 
-    def __init__(self, network, object_manager, do_id, parent_id, zone_id, dc_class, has_other, di):
+    def __init__(self, network, object_manager, ai_channel, do_id, parent_id, zone_id, dc_class, has_other, di):
         self._network = network
         self.object_manager = object_manager
 
         self._do_id = do_id
 
         self._old_ai_channel = 0
-        self._ai_channel = 0
+        self._ai_channel = ai_channel
 
         self._old_owner_id = 0
         self._owner_id = 0
@@ -898,13 +898,7 @@ class StateServer(io.NetworkConnector):
 
             return
 
-        state_object = StateObject(self, self.object_manager, do_id, parent_id,
-            zone_id, dc_class, has_other, di)
-
-        # TODO FIXME: find a better way to do this...
-        if self.shard_manager.has_shard(sender):
-            state_object.ai_channel = sender
-
+        state_object = StateObject(self, self.object_manager, sender, do_id, parent_id, zone_id, dc_class, has_other, di)
         self.object_manager.add_object(state_object)
 
     def handle_object_update_field(self, channel, sender, di):
