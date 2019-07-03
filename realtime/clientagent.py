@@ -1487,6 +1487,7 @@ class Client(io.NetworkHandler):
             self.handle_send_zone_resp(complete, old_zone_id, new_zone_id)
 
         self.__interest_timeout_task = None
+        self._pending_objects = []
 
     def handle_object_enter_owner(self, has_other, di):
         do_id = di.get_uint64()
