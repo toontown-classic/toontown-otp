@@ -1437,6 +1437,10 @@ class Client(io.NetworkHandler):
         if self._generate_deferred_callback:
             self._generate_deferred_callback.callback(False)
 
+        if not num_objects:
+            self._handle_interest_done()
+            return
+
         if self.__interest_timeout_task:
             taskMgr.remove(self.__interest_timeout_task)
             self.__interest_timeout_task = None
@@ -1486,9 +1490,6 @@ class Client(io.NetworkHandler):
         else:
             self.handle_send_zone_resp(complete, old_zone_id, new_zone_id)
 
-        self.__interest_timeout_task = None
-        self._pending_objects = []
-
     def handle_object_enter_owner(self, has_other, di):
         do_id = di.get_uint64()
         parent_id = di.get_uint64()
@@ -1504,15 +1505,23 @@ class Client(io.NetworkHandler):
 
         self._owned_objects.append(do_id)
 
-    def _handle_interest_timeout(self, task):
-        if len(self._pending_objects) > 0:
-            self.notify.warning('Interest handle timed out for channel: %d, forcing completion...' % self.channel)
+    def _handle_interest_done(self):
+        if self.__interest_timeout_task:
+            taskMgr.remove(self.__interest_timeout_task)
+            self.__interest_timeout_task = None
 
         if self._generate_deferred_callback:
             self._generate_deferred_callback.callback(True)
             self._generate_deferred_callback.destroy()
             self._generate_deferred_callback = None
 
+        self._pending_objects = []
+
+    def _handle_interest_timeout(self, task):
+        if len(self._pending_objects) > 0:
+            self.notify.warning('Interest handle timed out for channel: %d, forcing completion...' % self.channel)
+
+        self._handle_interest_done()
         return task.done
 
     def handle_object_enter_location(self, has_other, di):
@@ -1556,6 +1565,12 @@ class Client(io.NetworkHandler):
         # to see when this object generate has arrived.
         if do_id in self._pending_objects:
             self._pending_objects.remove(do_id)
+
+            # if we have no more pending objects left to add,
+            # then the interest timeout handle is now complete.
+            if not self._pending_objects:
+                self._handle_interest_done()
+                return
 
     def send_client_object_delete_resp(self, do_id):
         # if the object is in the list of owned objects, we do not want to
@@ -1656,7 +1671,7 @@ class ClientAgent(io.NetworkListener, io.NetworkConnector):
         self._server_version = config.GetString('clientagent-version', 'no-version')
         self._server_hash_val = int(config.GetString('clientagent-hash-val', '0'))
 
-        self._interest_timeout = config.GetFloat('clientagent-interest-timeout', 3.5)
+        self._interest_timeout = config.GetFloat('clientagent-interest-timeout', 5.0)
 
         self._database_interface = util.DatabaseInterface(self)
         self._account_manager = ClientAccountManager(self)
