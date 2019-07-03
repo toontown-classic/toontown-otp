@@ -1671,7 +1671,7 @@ class ClientAgent(io.NetworkListener, io.NetworkConnector):
         self._server_version = config.GetString('clientagent-version', 'no-version')
         self._server_hash_val = int(config.GetString('clientagent-hash-val', '0'))
 
-        self._interest_timeout = config.GetFloat('clientagent-interest-timeout', 5.0)
+        self._interest_timeout = config.GetFloat('clientagent-interest-timeout', 2.5)
 
         self._database_interface = util.DatabaseInterface(self)
         self._account_manager = ClientAccountManager(self)

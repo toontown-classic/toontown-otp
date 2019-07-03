@@ -22,7 +22,7 @@ clientagent-dbm-filename databases/database.dbm
 clientagent-dbm-mode c
 clientagent-version sv1.0.6.9
 clientagent-hash-val 3005460305
-clientagent-interest-timeout 5.0
+clientagent-interest-timeout 2.5
 
 # StateServer:
 stateserver-connect-address 127.0.0.1
