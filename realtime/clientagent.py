@@ -893,6 +893,8 @@ class Client(io.NetworkHandler):
         self._interest_manager = InterestManager()
 
         self._location_deferred_callback = None
+
+        self.__interest_timeout_task = None
         self._generate_deferred_callback = None
 
         self._seen_objects = {}
@@ -1435,11 +1437,13 @@ class Client(io.NetworkHandler):
         if self._generate_deferred_callback:
             self._generate_deferred_callback.callback(False)
 
-        if len(self._pending_objects) == 0:
-            if self._generate_deferred_callback:
-                self._generate_deferred_callback.callback(True)
-                self._generate_deferred_callback.destroy()
-                self._generate_deferred_callback = None
+        if self.__interest_timeout_task:
+            taskMgr.remove(self.__interest_timeout_task)
+            self.__interest_timeout_task = None
+
+        self.__interest_timeout_task = taskMgr.doMethodLater(self.network.interest_timeout,
+            self._handle_interest_timeout,
+            'interest-timeout-%d' % self.channel)
 
     def send_client_done_set_zone_resp(self, zone_id):
         datagram = io.NetworkDatagram()
@@ -1482,6 +1486,8 @@ class Client(io.NetworkHandler):
         else:
             self.handle_send_zone_resp(complete, old_zone_id, new_zone_id)
 
+        self.__interest_timeout_task = None
+
     def handle_object_enter_owner(self, has_other, di):
         do_id = di.get_uint64()
         parent_id = di.get_uint64()
@@ -1496,6 +1502,17 @@ class Client(io.NetworkHandler):
         self.handle_send_datagram(datagram)
 
         self._owned_objects.append(do_id)
+
+    def _handle_interest_timeout(self, task):
+        if len(self._pending_objects) > 0:
+            self.notify.warning('Interest handle timed out for channel: %d, forcing completion...' % self.channel)
+
+        if self._generate_deferred_callback:
+            self._generate_deferred_callback.callback(True)
+            self._generate_deferred_callback.destroy()
+            self._generate_deferred_callback = None
+
+        return task.done
 
     def handle_object_enter_location(self, has_other, di):
         do_id = di.get_uint64()
@@ -1538,14 +1555,6 @@ class Client(io.NetworkHandler):
         # to see when this object generate has arrived.
         if do_id in self._pending_objects:
             self._pending_objects.remove(do_id)
-
-            # finally check to see if we have no more pending
-            # objects to look for, if so then finish the interest event...
-            if len(self._pending_objects) == 0:
-                if self._generate_deferred_callback:
-                    self._generate_deferred_callback.callback(True)
-                    self._generate_deferred_callback.destroy()
-                    self._generate_deferred_callback = None
 
     def send_client_object_delete_resp(self, do_id):
         # if the object is in the list of owned objects, we do not want to
@@ -1646,6 +1655,8 @@ class ClientAgent(io.NetworkListener, io.NetworkConnector):
         self._server_version = config.GetString('clientagent-version', 'no-version')
         self._server_hash_val = int(config.GetString('clientagent-hash-val', '0'))
 
+        self._interest_timeout = config.GetFloat('clientagent-interest-timeout', 3.5)
+
         self._database_interface = util.DatabaseInterface(self)
         self._account_manager = ClientAccountManager(self)
 
@@ -1660,6 +1671,10 @@ class ClientAgent(io.NetworkListener, io.NetworkConnector):
     @property
     def server_hash_val(self):
         return self._server_hash_val
+
+    @property
+    def interest_timeout(self):
+        return self._interest_timeout
 
     @property
     def database_interface(self):
