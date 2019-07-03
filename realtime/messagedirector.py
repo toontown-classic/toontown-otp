@@ -5,8 +5,8 @@
  * Licensing information can found in 'LICENSE', which is part of this source code package.
 """
 
-import time
 import collections
+import time
 
 from panda3d.core import *
 
@@ -165,48 +165,6 @@ class MessageHandle(object):
         self._datagram = None
         self._timestamp = None
 
-class GroupedMessageHandle(object):
-
-    def __init__(self, channel, sender, message_type):
-        self._channel = channel
-        self._sender = sender
-        self._message_type = message_type
-        self._messages = collections.deque()
-
-    @property
-    def channel(self):
-        return self._channel
-
-    @property
-    def sender(self):
-        return self._sender
-
-    @property
-    def message_type(self):
-        return self._message_type
-
-    @property
-    def messages(self):
-        return self._messages
-
-    def add_message_handle(self, message_handle):
-        if message_handle in self._messages:
-            return
-
-        self._messages.append(message_handle)
-
-    def remove_message_handle(self, message_handle):
-        if message_handle not in self._messages:
-            return
-
-        self._messages.remove(message_handle)
-
-    def destroy(self):
-        self._channel = None
-        self._sender = None
-        self._message_type = None
-        self._messages = None
-
 class PostMessageHandle(object):
 
     def __init__(self, channel, datagram):
@@ -254,10 +212,18 @@ class MessageInterface(object):
         #
         #    return
 
-        message_handle = MessageHandle(channel, sender, message_type,
-            datagram, self.get_timestamp())
+        message_handle = MessageHandle(channel, sender, message_type, datagram, self.get_timestamp())
+        if not self._network.interface.has_participant(channel):
+            self._messages.append(message_handle)
+        else:
+            # in this case, we have a receiver and there's no reason to not
+            # route the message right now, in other cases that we have no receiver;
+            # we want to queue those messages until they are sent or expire...
+            participant = self._network.interface.get_participant(message_handle.channel)
+            if not participant:
+                return
 
-        self._messages.append(message_handle)
+            self.route_datagram(message_handle, participant)
 
     def remove_handle(self, message_handle):
         if not isinstance(message_handle, MessageHandle):
@@ -298,17 +264,27 @@ class MessageInterface(object):
     def setup(self):
         self.__flush_task = task_mgr.add(self.__flush, self._network.get_unique_name('flush-queue'))
 
-    def route_datagram(self, participant, channel, sender, message_type, msg_datagram):
-        assert(participant != None)
+    def route_datagram(self, message_handle, participant):
+        assert(message_handle != None)
 
         datagram = io.NetworkDatagram()
-        datagram.add_header(channel, sender, message_type)
-        datagram.append_data(msg_datagram.get_message())
+        datagram.add_header(message_handle.channel, message_handle.sender,
+            message_handle.message_type)
 
+        other_datagram = message_handle.datagram
+        datagram.append_data(other_datagram.get_message())
         participant.handle_send_datagram(datagram)
 
+        # destroy the datagram and message handle objects since they are
+        # no longer needed in this scope...
+        other_datagram.clear()
         datagram.clear()
+
+        del other_datagram
         del datagram
+
+        message_handle.destroy()
+        del message_handle
 
     def __flush(self, task):
         # check to see if we have any available messages in the
@@ -316,11 +292,10 @@ class MessageInterface(object):
         if not len(self._messages):
             return task.cont
 
-        grouped_messages = {}
         for _ in xrange(len(self._messages)):
             # pull a message handle object off the top of the queue,
             # then attempt to route it to its appropiate channel...
-            message_handle = self._messages.pop()
+            message_handle = self._messages.popleft()
             assert(message_handle != None)
 
             # before we can attempt to route this message, we need to check and
@@ -337,36 +312,12 @@ class MessageInterface(object):
                 self._messages.append(message_handle)
                 continue
 
-            group_message_handle = grouped_messages.setdefault(message_handle.channel,
-                GroupedMessageHandle(message_handle.channel, message_handle.sender, message_handle.message_type))
+            # we've successfully found the channel in which this message will be routed to,
+            # and have a valid message, now reconstruct the message and send it off...
+            participant = self._network.interface.get_participant(message_handle.channel)
+            assert(participant != None)
 
-            group_message_handle.add_message_handle(message_handle)
-
-        for channel, group_message_handle in grouped_messages.iteritems():
-            participant = self._network.interface.get_participant(channel)
-            if not participant:
-                continue
-
-            datagram = NetDatagram()
-            for x in xrange(len(group_message_handle.messages)):
-                message_handle = group_message_handle.messages[x]
-                assert(message_handle != None)
-
-                datagram.append_data(message_handle.datagram.get_message())
-                message_handle.destroy()
-                del message_handle
-
-            self.route_datagram(participant, group_message_handle.channel,
-                group_message_handle.sender, group_message_handle.message_type, datagram)
-
-            group_message_handle.destroy()
-            del group_message_handle
-
-            datagram.clear()
-            del datagram
-
-        grouped_messages = {}
-        del grouped_messages
+            self.route_datagram(message_handle, participant)
 
         return task.cont
 
