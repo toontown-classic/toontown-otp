@@ -1400,7 +1400,9 @@ class Client(io.NetworkHandler):
                     if do_id not in self._owned_objects:
                         self.send_client_object_delete_resp(do_id)
 
-                del self._seen_objects[old_zone_id]
+                # remove the array assigned to the zone if it's there...
+                if old_zone_id in self._seen_objects:
+                    del self._seen_objects[old_zone_id]
 
         self._generate_deferred_callback = util.DeferredCallback(self.handle_set_zone_complete_callback,
             old_parent_id, old_zone_id, new_parent_id, new_zone_id)
