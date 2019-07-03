@@ -469,11 +469,9 @@ class StateObject(object):
         for zone_object in itertools.ifilter(lambda x: x.owner_id > 0, self.get_all_zone_objects()):
             if send_location_departure:
                 child_object.handle_send_changing_location(zone_object.owner_id)
-                continue
 
             if send_location_entry:
                 child_object.handle_send_location_entry(zone_object.owner_id)
-                continue
 
         # acknowledge the object's location change was successful.
         if child_object.owner_id:

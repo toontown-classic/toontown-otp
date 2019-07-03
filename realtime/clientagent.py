@@ -1616,13 +1616,11 @@ class Client(io.NetworkHandler):
         new_parent_id = di.get_uint32()
         new_zone_id = di.get_uint32()
 
+        # if we've seen the object, then delete it.
         if not self.has_seen_object(do_id):
             return
 
         if do_id in self._owned_objects:
-            return
-
-        if not self._interest_manager.has_interest_zone(new_zone_id):
             return
 
         self.send_client_object_delete_resp(do_id)
