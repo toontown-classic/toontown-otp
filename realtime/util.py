@@ -120,9 +120,7 @@ class DatabaseInterface(object):
         success = di.get_uint8()
 
         if ctx not in self._callbacks:
-            self.notify.warning('Received unexpected %s (ctx %d)' % (
-                MsgId2Names[message_type], ctx))
-
+            self.notify.warning('Received unexpected %s (ctx %d)' % (message_type, ctx))
             return
 
         try:
