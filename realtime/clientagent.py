@@ -426,8 +426,8 @@ class LoadAvatarFSM(ClientOperation):
             field = self._dc_class.get_field_by_name(field_name)
 
             if not field:
-                self.notify.warning('Failed to pack fields for object %d, unknown field: %s!' % (
-                    self._avatar_id, field_name))
+                self.notify.warning('Failed to pack fields for object %d, '
+                    'unknown field: %s!' % (self._avatar_id, field_name))
 
                 return
 
@@ -472,14 +472,6 @@ class LoadAvatarFSM(ClientOperation):
         datagram.append_data(field_packer.get_string())
         self.manager.network.handle_send_connection_datagram(datagram)
 
-        # grant ownership over the distributed object...
-        datagram = io.NetworkDatagram()
-        datagram.add_header(self._avatar_id, channel,
-            types.STATESERVER_OBJECT_SET_OWNER)
-
-        datagram.add_uint64(channel)
-        self.manager.network.handle_send_connection_datagram(datagram)
-
         # setup a post remove message that will delete the
         # client's toon object when they disconnect...
         post_remove = io.NetworkDatagram()
@@ -493,6 +485,14 @@ class LoadAvatarFSM(ClientOperation):
             types.CONTROL_ADD_POST_REMOVE)
 
         datagram.append_data(post_remove.get_message())
+        self.manager.network.handle_send_connection_datagram(datagram)
+
+        # grant ownership over the distributed object...
+        datagram = io.NetworkDatagram()
+        datagram.add_header(self._avatar_id, channel,
+            types.STATESERVER_OBJECT_SET_OWNER)
+
+        datagram.add_uint64(channel)
         self.manager.network.handle_send_connection_datagram(datagram)
 
         # we're all done.
