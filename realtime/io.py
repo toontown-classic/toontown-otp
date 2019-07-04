@@ -269,7 +269,8 @@ class NetworkConnector(NetworkManager):
         Handles incoming data from the connector
         """
 
-        self._readable.append(datagram)
+        di = NetworkDatagramIterator(datagram)
+        self.handle_internal_datagram(di)
 
     def handle_send_connection_datagram(self, datagram):
         """
@@ -435,7 +436,8 @@ class NetworkHandler(NetworkManager):
         Puts an incoming datagram in the data queue
         """
 
-        self._readable.append(datagram)
+        di = NetworkDatagramIterator(datagram)
+        self.handle_datagram(di)
 
     def handle_datagram(self, di):
         """
