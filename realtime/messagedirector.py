@@ -188,9 +188,7 @@ class MessageInterface(object):
 
     def __init__(self, network):
         self._network = network
-        self._message_timeout = config.GetFloat(
-            'messagedirector-message-timeout', 15.0)
-
+        self._flush_timeout = config.GetFloat('messagedirector-flush-timeout', 0.001)
         self._messages = collections.deque()
         self._post_messages = {}
 
@@ -255,7 +253,7 @@ class MessageInterface(object):
         del self._post_messages[channel]
 
     def setup(self):
-        self.__flush_task = task_mgr.doMethodLater(0.001, self.__flush,
+        self.__flush_task = task_mgr.doMethodLater(self._flush_timeout, self.__flush,
             self._network.get_unique_name('flush-queue'))
 
     def route_datagram(self, message_handle, participant):
