@@ -206,6 +206,9 @@ class MessageInterface(object):
         return round(time.time(), 2)
 
     def append_handle(self, channel, sender, message_type, datagram):
+        if not channel:
+            return
+
         #if not datagram.get_length():
         #    self.notify.warning('Failed to append messenger handle from sender: '
         #        '%d to channel: %d, invalid datagram!' % (sender, channel))
@@ -213,17 +216,7 @@ class MessageInterface(object):
         #    return
 
         message_handle = MessageHandle(channel, sender, message_type, datagram, self.get_timestamp())
-        if not self._network.interface.has_participant(channel):
-            self._messages.append(message_handle)
-        else:
-            # in this case, we have a receiver and there's no reason to not
-            # route the message right now, in other cases that we have no receiver;
-            # we want to queue those messages until they are sent or expire...
-            participant = self._network.interface.get_participant(message_handle.channel)
-            if not participant:
-                return
-
-            self.route_datagram(message_handle, participant)
+        self._messages.appendleft(message_handle)
 
     def remove_handle(self, message_handle):
         if not isinstance(message_handle, MessageHandle):
@@ -262,7 +255,8 @@ class MessageInterface(object):
         del self._post_messages[channel]
 
     def setup(self):
-        self.__flush_task = task_mgr.add(self.__flush, self._network.get_unique_name('flush-queue'))
+        self.__flush_task = task_mgr.doMethodLater(0.001, self.__flush,
+            self._network.get_unique_name('flush-queue'))
 
     def route_datagram(self, message_handle, participant):
         assert(message_handle != None)
@@ -287,39 +281,20 @@ class MessageInterface(object):
         del message_handle
 
     def __flush(self, task):
-        # check to see if we have any available messages in the
-        # queue to route...
-        if not len(self._messages):
-            return task.cont
-
         for _ in xrange(len(self._messages)):
             # pull a message handle object off the top of the queue,
             # then attempt to route it to its appropiate channel...
             message_handle = self._messages.popleft()
             assert(message_handle != None)
 
-            # before we can attempt to route this message, we need to check and
-            # see if the channel exists on the participant interface...
-            if not self._network.interface.has_participant(message_handle.channel):
-                # each message has a delay as to when it will be automatically removed.
-                # let's just check to make sure we can "re-queue" it again...
-                if self.get_timestamp() - message_handle.timestamp > self._message_timeout:
-                    continue
-
-                # even though this message's channel couldn't be found,
-                # this message is still valid because it is within the message
-                # timeout time frame, we will "re-queue" it until it expires...
-                self._messages.append(message_handle)
-                continue
-
-            # we've successfully found the channel in which this message will be routed to,
-            # and have a valid message, now reconstruct the message and send it off...
             participant = self._network.interface.get_participant(message_handle.channel)
-            assert(participant != None)
+            if not participant:
+                #self.notify.warning('Cannot flush message for unknown channel: %d!' %  message_handle.channel)
+                continue
 
             self.route_datagram(message_handle, participant)
 
-        return task.cont
+        return task.again
 
     def flush_post_handles(self, channel):
         messages = self._post_messages.get(channel)
