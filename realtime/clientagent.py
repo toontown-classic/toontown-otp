@@ -1504,8 +1504,6 @@ class Client(io.NetworkHandler):
         zone_id = di.get_uint32()
         dc_id = di.get_uint16()
 
-        print ('handle_object_enter_owner', do_id, parent_id, zone_id, dc_id)
-
         datagram = io.NetworkDatagram()
         datagram.add_uint16(types.CLIENT_GET_AVATAR_DETAILS_RESP)
         datagram.add_uint32(do_id)
