@@ -473,10 +473,6 @@ class StateObject(object):
             if send_location_entry:
                 child_object.handle_send_location_entry(zone_object.owner_id)
 
-        # acknowledge the object's location change was successful.
-        if child_object.owner_id:
-            child_object.handle_send_object_location_ack(child_object.owner_id)
-
     def handle_set_location(self, sender, di):
         new_parent_id = di.get_uint32()
         new_zone_id = di.get_uint32()
@@ -734,6 +730,10 @@ class StateObjectManager(object):
         # them in a zone of their's...
         if state_object.parent_id:
             state_object.handle_send_changing_location(state_object.parent_id)
+
+        # acknowledge the object's location change
+        if state_object.owner_id:
+            state_object.handle_send_object_location_ack(state_object.owner_id)
 
     def handle_updating_field(self, state_object, sender, field, field_args, excludes=[]):
         assert(state_object != None)

@@ -404,12 +404,10 @@ class LoadAvatarFSM(ClientOperation):
         pass
 
     def _handle_activate_avatar(self, task):
-        channel = self._account_id << 32 | self._avatar_id
-
         # setup a post remove message that will delete the
         # client's toon object when they disconnect...
         post_remove = io.NetworkDatagram()
-        post_remove.add_header(self._avatar_id, channel,
+        post_remove.add_header(self._avatar_id, self.client.channel,
             types.STATESERVER_OBJECT_DELETE_RAM)
 
         post_remove.add_uint32(self._avatar_id)
@@ -423,10 +421,10 @@ class LoadAvatarFSM(ClientOperation):
 
         # grant ownership over the distributed object...
         datagram = io.NetworkDatagram()
-        datagram.add_header(self._avatar_id, channel,
+        datagram.add_header(self._avatar_id, self.client.channel,
             types.STATESERVER_OBJECT_SET_OWNER)
 
-        datagram.add_uint64(channel)
+        datagram.add_uint64(self.client.channel)
         self.manager.network.handle_send_connection_datagram(datagram)
 
         # we're all done.

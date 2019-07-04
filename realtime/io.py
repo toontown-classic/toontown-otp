@@ -399,14 +399,14 @@ class NetworkHandler(NetworkManager):
         self._network.remove_channel_to_handler(channel)
 
     def handle_set_channel_id(self, channel):
-        # only allow them to unregister another channel they set before,
-        # do not allow the allocated channel to be unregistered because we
-        # use that channel to determine when the client disconnects...
-        if channel != self._channel and self._channel != self._allocated_channel:
+        if channel == self._channel:
+            return
+
+        self.register_for_channel(channel)
+        if self._channel and self._channel != self._allocated_channel:
             self.unregister_for_channel(self._channel)
 
         self._channel = channel
-        self.register_for_channel(channel)
 
     def __update(self, task):
         """
@@ -459,11 +459,13 @@ class NetworkHandler(NetworkManager):
         self._network.handle_disconnected(self)
 
     def shutdown(self):
-        if self._allocated_channel and self._channel != self._allocated_channel:
-            self.unregister_for_channel(self._allocated_channel)
-
         if self._channel:
             self.unregister_for_channel(self._channel)
+            self._channel = 0
+
+        if self._allocated_channel:
+            self.unregister_for_channel(self._allocated_channel)
+            self._allocated_channel = 0
 
         if self.__update_task:
             task_mgr.remove(self.__update_task)
