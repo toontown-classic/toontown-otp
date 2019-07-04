@@ -473,6 +473,10 @@ class StateObject(object):
             if send_location_entry:
                 child_object.handle_send_location_entry(zone_object.owner_id)
 
+        # acknowledge the object's location change
+        if child_object.owner_id:
+            child_object.handle_send_object_location_ack(child_object.owner_id)
+
     def handle_set_location(self, sender, di):
         new_parent_id = di.get_uint32()
         new_zone_id = di.get_uint32()
@@ -481,8 +485,7 @@ class StateObject(object):
 
         self.parent_id = new_parent_id
         self.zone_id = new_zone_id
-
-        self.handle_changing_location(self._zone_id, new_parent_id, new_zone_id)
+        self.object_manager.handle_changing_location(self)
 
     def handle_get_zones_objects(self, sender, di):
         zone_ids = [di.get_uint32() for _ in xrange(di.get_uint16())]
@@ -676,16 +679,13 @@ class StateObject(object):
                     self.handle_send_save_field(field, field_args)
 
     def destroy(self):
-        self.owner_id = 0
         self.parent_id = 0
         self.zone_id = 0
 
-        # manually clear the object's interest and the object's
-        # existance on an AI if it exists on one...
         self.handle_send_departure(self._ai_channel)
-        parent_object = self._network.object_manager.get_object(self._old_parent_id)
-        if parent_object is not None:
-            parent_object.handle_changing_location(self._do_id, self._parent_id, self._zone_id)
+        self.object_manager.handle_changing_location(self)
+
+        self.owner_id = 0
 
         self._required_fields = {}
         self._other_fields = {}
@@ -730,10 +730,6 @@ class StateObjectManager(object):
         # them in a zone of their's...
         if state_object.parent_id:
             state_object.handle_send_changing_location(state_object.parent_id)
-
-        # acknowledge the object's location change
-        if state_object.owner_id:
-            state_object.handle_send_object_location_ack(state_object.owner_id)
 
     def handle_updating_field(self, state_object, sender, field, field_args, excludes=[]):
         assert(state_object != None)
@@ -790,7 +786,7 @@ class StateServer(io.NetworkConnector):
     def handle_object_datagram(self, channel, sender, message_type, di):
         state_object = self.object_manager.get_object(channel)
         if not state_object:
-            self.notify.debug('Received an unknown message type: '
+            self.notify.warning('Received an unknown message type: '
                 '%d from channel: %d!' % (message_type, sender))
 
             return
