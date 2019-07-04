@@ -329,6 +329,8 @@ class NetworkHandler(NetworkManager):
         self._rendezvous = rendezvous
         self._address = address
         self._connection = connection
+
+        self._old_channel = 0
         self._channel = channel
         self._allocated_channel = channel
 
@@ -356,11 +358,16 @@ class NetworkHandler(NetworkManager):
     def channel(self):
         return self._channel
 
+    @property
+    def old_channel(self):
+        return self._old_channel
+
     @channel.setter
     def channel(self, channel):
         if not self._channel:
             self._allocated_channel = channel
 
+        self._old_channel = self._channel
         self._channel = channel
 
     @property
@@ -403,8 +410,8 @@ class NetworkHandler(NetworkManager):
             return
 
         self.register_for_channel(channel)
-        if self._channel and self._channel != self._allocated_channel:
-            self.unregister_for_channel(self._channel)
+        if self._old_channel and self._old_channel != self._allocated_channel:
+            self.unregister_for_channel(self._old_channel)
 
         self._channel = channel
 
@@ -459,6 +466,10 @@ class NetworkHandler(NetworkManager):
         self._network.handle_disconnected(self)
 
     def shutdown(self):
+        if self._old_channel:
+            self.unregister_for_channel(self._old_channel)
+            self._old_channel = 0
+
         if self._channel:
             self.unregister_for_channel(self._channel)
             self._channel = 0
