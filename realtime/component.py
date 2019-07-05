@@ -2,7 +2,12 @@ from realtime.notifier import notify
 
 
 class Component(object):
-    pass
+
+    def setup(self):
+        pass
+
+    def shutdown(self):
+        pass
 
 
 class ComponentManager(object):
