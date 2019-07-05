@@ -681,11 +681,12 @@ class StateObject(object):
     def destroy(self):
         self.parent_id = 0
         self.zone_id = 0
+        self.owner_id = 0
 
         self.handle_send_departure(self._ai_channel)
-        self.object_manager.handle_changing_location(self)
-
-        self.owner_id = 0
+        old_parent = self.object_manager.get_object(self._old_parent_id)
+        if old_parent is not None:
+            old_parent.handle_changing_location(self._do_id, self._parent_id, self._zone_id)
 
         self._required_fields = {}
         self._other_fields = {}
