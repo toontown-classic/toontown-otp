@@ -16,7 +16,7 @@ clientagent-port 6667
 clientagent-connect-address 127.0.0.1
 clientagent-connect-port 7100
 clientagent-channel 1000
-clientagent-max-channels 1000001000
+clientagent-max-channels 1009999999
 clientagent-min-channels 1000000000
 clientagent-dbm-filename databases/database.dbm
 clientagent-dbm-mode c
