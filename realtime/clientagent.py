@@ -861,7 +861,7 @@ class ClientAccountManager(ClientOperationManager):
 class InterestManager(object):
 
     def __init__(self):
-        self._interest_zones = []
+        self._interest_zones = [OTP_ZONE_ID_OLD_QUIET_ZONE]
 
     @property
     def interest_zones(self):
@@ -878,6 +878,9 @@ class InterestManager(object):
 
     def remove_interest_zone(self, zone_id):
         if zone_id not in self._interest_zones:
+            return
+
+        if zone_id == OTP_ZONE_ID_OLD_QUIET_ZONE:
             return
 
         self._interest_zones.remove(zone_id)
@@ -931,6 +934,13 @@ class Client(io.NetworkHandler):
 
             if len(seen_objects) == 0:
                 del self._seen_objects[zone_id]
+
+    def get_seen_object_zone(self, do_id):
+        for zone_id, seen_objects in list(self._seen_objects.items()):
+            if do_id in seen_objects:
+                return zone_id
+
+        return -1
 
     def startup(self):
         io.NetworkHandler.startup(self)
@@ -1579,16 +1589,6 @@ class Client(io.NetworkHandler):
                 return
 
     def send_client_object_delete_resp(self, do_id):
-        # if the object is in the list of owned objects, we do not want to
-        # delete this object, as it was already generated elsewhere...
-        if do_id in self._owned_objects:
-            return
-
-        # only delete the object if we've previously seen the objects
-        # generate request sent by the StateServer...
-        if not self.has_seen_object(do_id):
-            return
-
         datagram = io.NetworkDatagram()
         datagram.add_uint16(types.CLIENT_OBJECT_DELETE_RESP)
         datagram.add_uint32(do_id)
@@ -1622,11 +1622,13 @@ class Client(io.NetworkHandler):
         new_parent_id = di.get_uint32()
         new_zone_id = di.get_uint32()
 
-        # if we've seen the object, then delete it.
         if not self.has_seen_object(do_id):
             return
 
         if do_id in self._owned_objects:
+            return
+
+        if self._interest_manager.has_interest_zone(new_zone_id):
             return
 
         self.send_client_object_delete_resp(do_id)
@@ -1650,6 +1652,16 @@ class Client(io.NetworkHandler):
 
     def handle_object_delete_ram(self, di):
         do_id = di.get_uint32()
+        if not self.has_seen_object(do_id):
+            return
+
+        if do_id in self._owned_objects:
+            return
+
+        zone_id = self.get_seen_object_zone(do_id)
+        if zone_id == OTP_ZONE_ID_OLD_QUIET_ZONE:
+            return
+
         self.send_client_object_delete_resp(do_id)
 
     def shutdown(self):
