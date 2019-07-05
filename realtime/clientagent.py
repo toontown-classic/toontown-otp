@@ -21,6 +21,7 @@ from realtime import io
 from realtime import types
 from realtime.notifier import notify
 from realtime import util
+from realtime import component
 
 from game.OtpDoGlobals import *
 from game import ZoneUtil
@@ -861,7 +862,7 @@ class ClientAccountManager(ClientOperationManager):
 class InterestManager(object):
 
     def __init__(self):
-        self._interest_zones = [OTP_ZONE_ID_OLD_QUIET_ZONE]
+        self._interest_zones = []
 
     @property
     def interest_zones(self):
@@ -878,9 +879,6 @@ class InterestManager(object):
 
     def remove_interest_zone(self, zone_id):
         if zone_id not in self._interest_zones:
-            return
-
-        if zone_id == OTP_ZONE_ID_OLD_QUIET_ZONE:
             return
 
         self._interest_zones.remove(zone_id)
@@ -1402,8 +1400,8 @@ class Client(io.NetworkHandler):
         # add interest in our quiet zone, as the quiet zone objects need
         # to be regenerated once we leave the quiet zone; this is because the client
         # always deletes it's objects in the previous zones unless they have "OTHER" fields...
-        if new_zone_id != OTP_ZONE_ID_OLD_QUIET_ZONE:
-            self._interest_manager.add_interest_zone(OTP_ZONE_ID_OLD_QUIET_ZONE)
+        #if new_zone_id != OTP_ZONE_ID_OLD_QUIET_ZONE:
+        #    self._interest_manager.add_interest_zone(OTP_ZONE_ID_OLD_QUIET_ZONE)
 
         # send delete for all objects we've seen that were in the zone that we've just left...
         if old_zone_id in self._seen_objects:
@@ -1673,10 +1671,16 @@ class Client(io.NetworkHandler):
 
         io.NetworkHandler.shutdown(self)
 
-class ClientAgent(io.NetworkListener, io.NetworkConnector):
+class ClientAgent(io.NetworkListener, io.NetworkConnector, component.Component):
     notify = notify.new_category('ClientAgent')
 
-    def __init__(self, dc_loader, address, port, connect_address, connect_port, channel):
+    def __init__(self, dc_loader):
+        address = config.GetString('clientagent-address', '0.0.0.0')
+        port = config.GetInt('clientagent-port', 6667)
+        connect_address = config.GetString('database-connect-address', '127.0.0.1')
+        connect_port = config.GetInt('database-connect-port', 7100)
+        channel = config.GetInt('clientagent-channel', types.CLIENTAGENT_CHANNEL)
+
         io.NetworkListener.__init__(self, address, port, Client)
         io.NetworkConnector.__init__(self, dc_loader, connect_address, connect_port, channel)
 

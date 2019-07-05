@@ -20,6 +20,7 @@ from direct.fsm.FSM import FSM
 from realtime import io
 from realtime import types
 from realtime.notifier import notify
+from realtime import component
 
 
 class DatabaseError(RuntimeError):
@@ -634,11 +635,15 @@ class DatabaseSetFieldFSM(DatabaseOperationFSM):
         self._do_id = None
         self._field_data = None
 
-class DatabaseServer(io.NetworkConnector):
+class DatabaseServer(io.NetworkConnector, component.Component):
     notify = notify.new_category('DatabaseServer')
 
-    def __init__(self, *args, **kwargs):
-        io.NetworkConnector.__init__(self, *args, **kwargs)
+    def __init__(self, dc_loader):
+        connect_address = config.GetString('database-connect-address', '127.0.0.1')
+        connect_port = config.GetInt('database-connect-port', 7100)
+        channel = config.GetInt('database-channel', types.DATABASE_CHANNEL)
+
+        io.NetworkConnector.__init__(self, dc_loader, connect_address, connect_port, channel)
 
         self._backend = DatabaseJSONBackend()
         self._operation_manager = DatabaseOperationManager()

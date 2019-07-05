@@ -14,6 +14,7 @@ from realtime import io
 from realtime import types
 from realtime.notifier import notify
 from realtime import util
+from realtime import component
 
 from game.OtpDoGlobals import *
 from game import ZoneUtil
@@ -755,11 +756,15 @@ class StateObjectManager(object):
             state_object.handle_send_update_field(zone_object.owner_id, state_object.do_id, field, field_args)
 
 
-class StateServer(io.NetworkConnector):
+class StateServer(io.NetworkConnector, component.Component):
     notify = notify.new_category('StateServer')
 
-    def __init__(self, *args, **kwargs):
-        io.NetworkConnector.__init__(self, *args, **kwargs)
+    def __init__(self, dc_loader):
+        connect_address = config.GetString('stateserver-connect-address', '127.0.0.1')
+        connect_port = config.GetInt('stateserver-connect-port', 7100)
+        channel = config.GetInt('stateserver-channel', types.STATESERVER_CHANNEL)
+
+        io.NetworkConnector.__init__(self, dc_loader, connect_address, connect_port, channel)
 
         self.shard_manager = ShardManager()
         self.object_manager = StateObjectManager()

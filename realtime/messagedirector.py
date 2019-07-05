@@ -13,6 +13,7 @@ from panda3d.core import *
 from realtime import io
 from realtime import types
 from realtime.notifier import notify
+from realtime import component
 
 
 class MessageError(RuntimeError):
@@ -334,10 +335,13 @@ class MessageInterface(object):
             task_mgr.remove(self.__flush_task)
             self.__flush_task = None
 
-class MessageDirector(io.NetworkListener):
+class MessageDirector(io.NetworkListener, component.Component):
     notify = notify.new_category('MessageDirector')
 
-    def __init__(self, address, port):
+    def __init__(self):
+        address = config.GetString('messagedirector-address', '0.0.0.0')
+        port = config.GetInt('messagedirector-port', 7100)
+
         io.NetworkListener.__init__(self, address, port, Participant)
 
         self._interface = ParticipantInterface(self)
