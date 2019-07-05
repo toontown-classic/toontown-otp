@@ -6,7 +6,6 @@
 
 import __builtin__
 import os
-import psutil
 
 from panda3d.core import loadPrcFile
 
