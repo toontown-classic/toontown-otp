@@ -1677,8 +1677,8 @@ class ClientAgent(io.NetworkListener, io.NetworkConnector, component.Component):
     def __init__(self, dc_loader):
         address = config.GetString('clientagent-address', '0.0.0.0')
         port = config.GetInt('clientagent-port', 6667)
-        connect_address = config.GetString('database-connect-address', '127.0.0.1')
-        connect_port = config.GetInt('database-connect-port', 7100)
+        connect_address = config.GetString('clientagent-connect-address', '127.0.0.1')
+        connect_port = config.GetInt('clientagent-connect-port', 7100)
         channel = config.GetInt('clientagent-channel', types.CLIENTAGENT_CHANNEL)
 
         io.NetworkListener.__init__(self, address, port, Client)
