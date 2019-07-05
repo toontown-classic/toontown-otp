@@ -214,7 +214,7 @@ class MessageInterface(object):
         #    return
 
         message_handle = MessageHandle(channel, sender, message_type, datagram, self.get_timestamp())
-        self._messages.appendleft(message_handle)
+        self._messages.append(message_handle)
 
     def remove_handle(self, message_handle):
         if not isinstance(message_handle, MessageHandle):
