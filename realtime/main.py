@@ -7,6 +7,7 @@
 import __builtin__
 import os
 import sys
+import argparse
 
 from panda3d.core import loadPrcFile
 
@@ -22,15 +23,32 @@ __builtin__.task_mgr = task_mgr
 from realtime import io, component
 from realtime import messagedirector, clientagent, stateserver, database
 
+
+parser = argparse.ArgumentParser()
+parser.add_argument("-nmd", "--no-messagedirector", help="Disables the MessageDirector cluster component.", action='store_true')
+parser.add_argument("-nca", "--no-clientagent", help="Disables the ClientAgent cluster component.", action='store_true')
+parser.add_argument("-nss", "--no-stateserver", help="Disables the StateServer cluster component.", action='store_true')
+parser.add_argument("-ndb", "--no-database", help="Disables the DatabaseServer cluster component.", action='store_true')
+args = parser.parse_args()
+
+
 def main():
     dc_loader = io.NetworkDCLoader()
     dc_loader.read_dc_files(['config/dclass/toon.dc'])
 
     component_manager = component.ComponentManager()
-    component_manager.add_component(messagedirector.MessageDirector())
-    component_manager.add_component(clientagent.ClientAgent(dc_loader))
-    component_manager.add_component(stateserver.StateServer(dc_loader))
-    component_manager.add_component(database.DatabaseServer(dc_loader))
+
+    if not args.no_messagedirector:
+        component_manager.add_component(messagedirector.MessageDirector())
+
+    if not args.no_clientagent:
+        component_manager.add_component(clientagent.ClientAgent(dc_loader))
+
+    if not args.no_stateserver:
+        component_manager.add_component(stateserver.StateServer(dc_loader))
+
+    if not args.no_database:
+        component_manager.add_component(database.DatabaseServer(dc_loader))
 
     task_mgr.run()
     component_manager.shutdown()
