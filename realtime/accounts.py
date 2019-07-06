@@ -416,6 +416,34 @@ class LoadAvatarFSM(ClientOperation):
 
     def exitStart(self):
         pass
+        
+    def _handle_activate_avatar(self, task):	
+        # setup a post remove message that will delete the	
+        # client's toon object when they disconnect...	
+        post_remove = io.NetworkDatagram()	
+        post_remove.add_header(self._avatar_id, self.client.channel,	
+            types.STATESERVER_OBJECT_DELETE_RAM)	
+
+         post_remove.add_uint32(self._avatar_id)	
+
+         datagram = io.NetworkDatagram()	
+        datagram.add_control_header(self.client.allocated_channel,	
+            types.CONTROL_ADD_POST_REMOVE)	
+
+         datagram.append_data(post_remove.get_message())	
+        self.manager.network.handle_send_connection_datagram(datagram)	
+
+         # grant ownership over the distributed object...	
+        datagram = io.NetworkDatagram()	
+        datagram.add_header(self._avatar_id, self.client.channel,	
+            types.STATESERVER_OBJECT_SET_OWNER)	
+
+         datagram.add_uint64(self.client.channel)	
+        self.manager.network.handle_send_connection_datagram(datagram)	
+
+         # we're all done.	
+        self.cleanup(True, self._avatar_id)	
+        return task.done
 
     def enterActivate(self):
         # add them to the avatar channel
@@ -485,31 +513,7 @@ class LoadAvatarFSM(ClientOperation):
         datagram.append_data(field_packer.get_string())
         self.manager.network.handle_send_connection_datagram(datagram)
 
-        # setup a post remove message that will delete the
-        # client's toon object when they disconnect...
-        post_remove = io.NetworkDatagram()
-        post_remove.add_header(self._avatar_id, self.client.channel,
-            types.STATESERVER_OBJECT_DELETE_RAM)
-
-        post_remove.add_uint32(self._avatar_id)
-
-        datagram = io.NetworkDatagram()
-        datagram.add_control_header(self.client.allocated_channel,
-            types.CONTROL_ADD_POST_REMOVE)
-
-        datagram.append_data(post_remove.get_message())
-        self.manager.network.handle_send_connection_datagram(datagram)
-
-        # grant ownership over the distributed object...
-        datagram = io.NetworkDatagram()
-        datagram.add_header(self._avatar_id, self.client.channel,
-            types.STATESERVER_OBJECT_SET_OWNER)
-
-        datagram.add_uint64(self.client.channel)
-        self.manager.network.handle_send_connection_datagram(datagram)
-
-        # we're all done.
-        self.cleanup(True, self._avatar_id)
+        taskMgr.doMethodLater(0.2, self._handle_activate_avatar, 'activate-avatar-%d-task' % self._avatar_id)
 
     def exitActivate(self):
         pass
