@@ -230,25 +230,20 @@ class Client(io.NetworkHandler):
         except:
             self.handle_send_disconnect(types.CLIENT_DISCONNECT_TRUNCATED_DATAGRAM,
                 'Received truncated datagram from channel: %d!' % self._channel)
-
             return
 
         if server_version != self.network.server_version:
             self.handle_send_disconnect(types.CLIENT_DISCONNECT_BAD_VERSION,
                 'Invalid server version: %s, expected: %s!' % (server_version, self.network.server_version))
-
             return
 
         if hash_val != self.network.server_hash_val:
             self.handle_send_disconnect(types.CLIENT_DISCONNECT_BAD_DCHASH,
-                'Got an invalid dc hash value: %d expected: %d!' % (hash_val, self.network.server_hash_val))
-
+                'Got an invalid DC hash value: %d expected: %d!' % (hash_val, self.network.server_hash_val))
             return
 
-        if token_type != types.CLIENT_LOGIN_2_BLUE:
-            self.handle_send_disconnect(types.CLIENT_DISCONNECT_INVALID_PLAY_TOKEN_TYPE,
-                'Invalid play token type: %d!' % token_type)
-
+        if token_type != types.CLIENT_LOGIN_2_BLUE and token_type != CLIENT_LOGIN_2_PLAY_TOKEN:
+            self.handle_send_disconnect(types.CLIENT_DISCONNECT_INVALID_PLAY_TOKEN_TYPE, 'Invalid play token type: %d!' % token_type)
             return
 
         callback = lambda: self.__handle_login_resp(play_token)
@@ -407,9 +402,16 @@ class Client(io.NetworkHandler):
             name_indices.append(di.get_uint16())
             name_flags.append(di.get_uint16())
         except:
-            return self.handle_disconnect()
-
-        #TODO: Actually parse and set the name pattern name.
+            self.handle_send_disconnect(types.CLIENT_DISCONNECT_TRUNCATED_DATAGRAM,
+                'Received truncated datagram from channel: %d!' % self._channel)
+            return
+            
+        pattern = [(nameIndices[0], nameFlags[0]), (nameIndices[1], nameFlags[1]), (nameIndices[2], nameFlags[2]), (nameIndices[4], nameFlags[4])]
+        
+        self.network.account_manager.handle_operation(SetNamePatternFSM, self,
+            self.__handle_set_name_pattern_resp, avatar_id, pattern)
+        
+    def __handle_set_name_pattern_resp(self, avatar_id):
         datagram = io.NetworkDatagram()
         datagram.add_uint16(types.CLIENT_SET_NAME_PATTERN_ANSWER)
         datagram.add_uint32(avatar_id)
@@ -432,7 +434,6 @@ class Client(io.NetworkHandler):
         except:
             self.handle_send_disconnect(types.CLIENT_DISCONNECT_TRUNCATED_DATAGRAM,
                 'Received truncated datagram from channel: %d!' % self._channel)
-
             return
 
         account_id = self.get_account_id_from_channel_code(self.channel)
