@@ -940,9 +940,6 @@ class Client(io.NetworkHandler):
         io.NetworkHandler.startup(self)
 
     def handle_send_disconnect(self, code, reason):
-        #self.notify.warning('Disconnecting channel: %d, reason: %s' % (
-        #    self.channel, reason))
-
         datagram = io.NetworkDatagram()
         datagram.add_uint16(types.CLIENT_GO_GET_LOST)
         datagram.add_uint16(code)
@@ -956,8 +953,7 @@ class Client(io.NetworkHandler):
             message_type = di.get_uint16()
         except:
             self.handle_send_disconnect(types.CLIENT_DISCONNECT_TRUNCATED_DATAGRAM,
-                'Received truncated datagram from channel: %d!' % (
-                    self._channel))
+                'Received truncated datagram from channel: %d!' % self._channel)
 
             return
 
@@ -970,8 +966,7 @@ class Client(io.NetworkHandler):
         else:
             if not self._authenticated:
                 self.handle_send_disconnect(types.CLIENT_DISCONNECT_ANONYMOUS_VIOLATION,
-                    'Cannot send datagram with message type: %d, channel: %d not yet authenticated!' % (
-                        message_type, self.channel))
+                    'Cannot send datagram with message type: %d, channel: %d not yet authenticated!' % (message_type, self.channel))
 
                 return
             else:
@@ -1006,8 +1001,7 @@ class Client(io.NetworkHandler):
             self.handle_object_update_field(di)
         else:
             self.handle_send_disconnect(types.CLIENT_DISCONNECT_INVALID_MSGTYPE,
-                'Unknown datagram: %d from channel: %d!' % (
-                    message_type, self.channel))
+                'Unknown datagram: %d from channel: %d!' % (message_type, self.channel))
 
             return
 
@@ -1049,29 +1043,25 @@ class Client(io.NetworkHandler):
             token_type = di.get_int32()
         except:
             self.handle_send_disconnect(types.CLIENT_DISCONNECT_TRUNCATED_DATAGRAM,
-                'Received truncated datagram from channel: %d!' % (
-                    self._channel))
+                'Received truncated datagram from channel: %d!' % self._channel)
 
             return
 
         if server_version != self.network.server_version:
             self.handle_send_disconnect(types.CLIENT_DISCONNECT_BAD_VERSION,
-                'Invalid server version: %s, expected: %s!' % (
-                    server_version, self.network.server_version))
+                'Invalid server version: %s, expected: %s!' % (server_version, self.network.server_version))
 
             return
 
         if hash_val != self.network.server_hash_val:
             self.handle_send_disconnect(types.CLIENT_DISCONNECT_BAD_DCHASH,
-                'Got an invalid dc hash value: %d expected: %d!' % (
-                    hash_val, self.network.server_hash_val))
+                'Got an invalid dc hash value: %d expected: %d!' % (hash_val, self.network.server_hash_val))
 
             return
 
         if token_type != types.CLIENT_LOGIN_2_BLUE:
             self.handle_send_disconnect(types.CLIENT_DISCONNECT_INVALID_PLAY_TOKEN_TYPE,
-                'Invalid play token type: %d!' % (
-                    token_type))
+                'Invalid play token type: %d!' % token_type)
 
             return
 
@@ -1134,8 +1124,7 @@ class Client(io.NetworkHandler):
             index = di.get_uint8()
         except:
             self.handle_send_disconnect(types.CLIENT_DISCONNECT_TRUNCATED_DATAGRAM,
-                'Received truncated datagram from channel: %d!' % (
-                    self._channel))
+                'Received truncated datagram from channel: %d!' % self._channel)
 
             return
 
@@ -1156,8 +1145,7 @@ class Client(io.NetworkHandler):
             avatar_id = di.get_uint32()
         except:
             self.handle_send_disconnect(types.CLIENT_DISCONNECT_TRUNCATED_DATAGRAM,
-                'Received truncated datagram from channel: %d!' % (
-                    self._channel))
+                'Received truncated datagram from channel: %d!' % self._channel)
 
             return
 
@@ -1189,8 +1177,7 @@ class Client(io.NetworkHandler):
             avatar_id = di.get_uint32()
         except:
             self.handle_send_disconnect(types.CLIENT_DISCONNECT_TRUNCATED_DATAGRAM,
-                'Received truncated datagram from channel: %d!' % (
-                    self._channel))
+                'Received truncated datagram from channel: %d!' % self._channel)
 
             return
 
@@ -1203,8 +1190,7 @@ class Client(io.NetworkHandler):
             wish_name = di.get_string()
         except:
             self.handle_send_disconnect(types.CLIENT_DISCONNECT_TRUNCATED_DATAGRAM,
-                'Received truncated datagram from channel: %d!' % (
-                    self._channel))
+                'Received truncated datagram from channel: %d!' % self._channel)
 
             return
 
@@ -1259,8 +1245,7 @@ class Client(io.NetworkHandler):
             avatar_id = di.get_uint32()
         except:
             self.handle_send_disconnect(types.CLIENT_DISCONNECT_TRUNCATED_DATAGRAM,
-                'Received truncated datagram from channel: %d!' % (
-                    self._channel))
+                'Received truncated datagram from channel: %d!' % self._channel)
 
             return
 
@@ -1291,8 +1276,7 @@ class Client(io.NetworkHandler):
             shard_id = di.get_uint32()
         except:
             self.handle_send_disconnect(types.CLIENT_DISCONNECT_TRUNCATED_DATAGRAM,
-                'Received truncated datagram from channel: %d!' % (
-                    self._channel))
+                'Received truncated datagram from channel: %d!' % self._channel)
 
             return
 
@@ -1596,8 +1580,7 @@ class Client(io.NetworkHandler):
             field_id = di.get_uint16()
         except:
             self.handle_send_disconnect(types.CLIENT_DISCONNECT_TRUNCATED_DATAGRAM,
-                'Received truncated datagram from channel: %d!' % (
-                    self._channel))
+                'Received truncated datagram from channel: %d!' % self._channel)
 
             return
 
