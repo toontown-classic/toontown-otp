@@ -405,7 +405,7 @@ class Client(io.NetworkHandler):
                 'Received truncated datagram from channel: %d!' % self._channel)
             return
             
-        pattern = [(nameIndices[0], nameFlags[0]), (nameIndices[1], nameFlags[1]), (nameIndices[2], nameFlags[2]), (nameIndices[4], nameFlags[4])]
+        pattern = [(name_indices[0], name_flags[0]), (name_indices[1], name_flags[1]), (name_indices[2], name_flags[2]), (name_indices[3], name_flags[3])]
         
         self.network.account_manager.handle_operation(SetNamePatternFSM, self,
             self.__handle_set_name_pattern_resp, avatar_id, pattern)

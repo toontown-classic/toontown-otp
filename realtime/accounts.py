@@ -37,7 +37,7 @@ from realtime import types
 from realtime.notifier import notify
 from realtime import util
 
-from game import NameGenerator
+from game.NameGenerator import NameGenerator
 
 
 class ClientOperation(FSM):
@@ -424,24 +424,24 @@ class LoadAvatarFSM(ClientOperation):
         post_remove.add_header(self._avatar_id, self.client.channel,	
             types.STATESERVER_OBJECT_DELETE_RAM)	
 
-         post_remove.add_uint32(self._avatar_id)	
+        post_remove.add_uint32(self._avatar_id)	
 
-         datagram = io.NetworkDatagram()	
+        datagram = io.NetworkDatagram()	
         datagram.add_control_header(self.client.allocated_channel,	
             types.CONTROL_ADD_POST_REMOVE)	
 
-         datagram.append_data(post_remove.get_message())	
+        datagram.append_data(post_remove.get_message())	
         self.manager.network.handle_send_connection_datagram(datagram)	
 
-         # grant ownership over the distributed object...	
+        # grant ownership over the distributed object...	
         datagram = io.NetworkDatagram()	
         datagram.add_header(self._avatar_id, self.client.channel,	
             types.STATESERVER_OBJECT_SET_OWNER)	
 
-         datagram.add_uint64(self.client.channel)	
+        datagram.add_uint64(self.client.channel)	
         self.manager.network.handle_send_connection_datagram(datagram)	
 
-         # we're all done.	
+        # we're all done.	
         self.cleanup(True, self._avatar_id)	
         return task.done
 
