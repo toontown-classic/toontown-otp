@@ -210,8 +210,7 @@ class NetworkConnector(NetworkManager):
             self.__port, self.__timeout)
 
         if not self.__socket:
-            raise NetworkError('Failed to connect TCP socket on address: <%s:%d>!' % (
-                self.__address, self.__port))
+            raise NetworkError('Failed to connect TCP socket on address: %s:%d' % (self.__address, self.__port))
 
         self.__reader.add_connection(self.__socket)
         self.register_for_channel(self._channel)
@@ -680,6 +679,9 @@ class NetworkListener(NetworkManager):
             return
 
         self.__writer.send(datagram, connection)
+
+    def handle_send_connection_datagram(self, datagram):
+        pass
 
     def handle_disconnect(self, handler):
         """
