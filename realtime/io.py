@@ -474,14 +474,17 @@ class NetworkHandler(NetworkManager):
         Disconnects our client socket instance
         """
 
-        self._network.handle_disconnect(self)
+        self._network.handle_disconnect()
 
     def handle_disconnected(self):
         """
         Handles disconnection when the socket connection closes
         """
 
-        self._network.handle_disconnected(self)
+        try:
+            self._network.handle_disconnected(self)
+        except:
+            self._network.handle_disconnected()
 
     def shutdown(self):
         if self._old_channel:
