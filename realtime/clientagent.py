@@ -836,7 +836,7 @@ class Client(io.NetworkHandler):
 
         io.NetworkHandler.shutdown(self)
 
-class ClientAgent(io.NetworkListener, io.NetworkConnector, component.Component):
+class ClientAgent(io.NetworkConnector, io.NetworkListener, component.Component):
     notify = notify.new_category('ClientAgent')
 
     def __init__(self, dc_loader):
@@ -846,8 +846,8 @@ class ClientAgent(io.NetworkListener, io.NetworkConnector, component.Component):
         connect_port = config.GetInt('clientagent-connect-port', 7100)
         channel = config.GetInt('clientagent-channel', types.CLIENTAGENT_CHANNEL)
 
-        io.NetworkListener.__init__(self, address, port, Client)
         io.NetworkConnector.__init__(self, dc_loader, connect_address, connect_port, channel)
+        io.NetworkListener.__init__(self, address, port, Client)
 
         min_channels = config.GetInt('clientagent-min-channels', 1000000000)
         max_channels = config.GetInt('clientagent-max-channels', 1009999999)
