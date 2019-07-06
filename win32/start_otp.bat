@@ -8,7 +8,7 @@ rem     set PYTHON_CMD=ppython
 rem )
 
 rem A Temporary Solution as you HAVE to use a 64 bit Panda with the current database.
-set PYTHON_CMD=C:\Panda3D-1.10.0-x64\python\ppython.exe
+set PYTHON_CMD=C:\Panda3D-1.11.0-x64-astron\python\ppython.exe
 
 cd ../
 

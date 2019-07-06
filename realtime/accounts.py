@@ -37,6 +37,8 @@ from realtime import types
 from realtime.notifier import notify
 from realtime import util
 
+from game.NameGenerator import NameGenerator
+
 
 class ClientOperation(FSM):
     notify = notify.new_category('ClientOperation')
@@ -414,6 +416,34 @@ class LoadAvatarFSM(ClientOperation):
 
     def exitStart(self):
         pass
+        
+    def _handle_activate_avatar(self, task):	
+        # setup a post remove message that will delete the	
+        # client's toon object when they disconnect...	
+        post_remove = io.NetworkDatagram()	
+        post_remove.add_header(self._avatar_id, self.client.channel,	
+            types.STATESERVER_OBJECT_DELETE_RAM)	
+
+        post_remove.add_uint32(self._avatar_id)	
+
+        datagram = io.NetworkDatagram()	
+        datagram.add_control_header(self.client.allocated_channel,	
+            types.CONTROL_ADD_POST_REMOVE)	
+
+        datagram.append_data(post_remove.get_message())	
+        self.manager.network.handle_send_connection_datagram(datagram)	
+
+        # grant ownership over the distributed object...	
+        datagram = io.NetworkDatagram()	
+        datagram.add_header(self._avatar_id, self.client.channel,	
+            types.STATESERVER_OBJECT_SET_OWNER)	
+
+        datagram.add_uint64(self.client.channel)	
+        self.manager.network.handle_send_connection_datagram(datagram)	
+
+        # we're all done.	
+        self.cleanup(True, self._avatar_id)	
+        return task.done
 
     def enterActivate(self):
         # add them to the avatar channel
@@ -440,7 +470,6 @@ class LoadAvatarFSM(ClientOperation):
             if not field:
                 self.notify.warning('Failed to pack fields for object %d, '
                     'unknown field: %s!' % (self._avatar_id, field_name))
-
                 return
 
             sorted_fields[field.get_number()] = field_args
@@ -484,31 +513,7 @@ class LoadAvatarFSM(ClientOperation):
         datagram.append_data(field_packer.get_string())
         self.manager.network.handle_send_connection_datagram(datagram)
 
-        # setup a post remove message that will delete the
-        # client's toon object when they disconnect...
-        post_remove = io.NetworkDatagram()
-        post_remove.add_header(self._avatar_id, self.client.channel,
-            types.STATESERVER_OBJECT_DELETE_RAM)
-
-        post_remove.add_uint32(self._avatar_id)
-
-        datagram = io.NetworkDatagram()
-        datagram.add_control_header(self.client.allocated_channel,
-            types.CONTROL_ADD_POST_REMOVE)
-
-        datagram.append_data(post_remove.get_message())
-        self.manager.network.handle_send_connection_datagram(datagram)
-
-        # grant ownership over the distributed object...
-        datagram = io.NetworkDatagram()
-        datagram.add_header(self._avatar_id, self.client.channel,
-            types.STATESERVER_OBJECT_SET_OWNER)
-
-        datagram.add_uint64(self.client.channel)
-        self.manager.network.handle_send_connection_datagram(datagram)
-
-        # we're all done.
-        self.cleanup(True, self._avatar_id)
+        taskMgr.doMethodLater(0.2, self._handle_activate_avatar, 'activate-avatar-%d-task' % self._avatar_id)
 
     def exitActivate(self):
         pass
@@ -684,6 +689,79 @@ class SetNameFSM(ClientOperation):
 
     def exitSetName(self):
         self.notify.debug("SetNameFSM.exitSetName()")
+        
+class SetNamePatternFSM(ClientOperation):
+    notify = notify.new_category('SetNamePatternFSM')
+
+    def __init__(self, manager, client, callback, avatar_id, pattern):
+        self.notify.debug("SetNamePatternFSM.__init__(%s, %s, %s, %s, %s)" % (str(manager), str(client),
+            str(callback), str(avatar_id), str(pattern)))
+
+        ClientOperation.__init__(self, manager, client, callback)
+
+        self._avatar_id = avatar_id
+        self._pattern = pattern
+        self._callback = callback
+        self._dc_class = None
+        self._fields = {}
+
+    def enterStart(self):
+        self.notify.debug("SetNamePatternFSM.enterQuery()")
+
+        def response(dclass, fields):
+            self.notify.debug("SetNamePatternFSM.enterQuery.response(%s, %s)" % (str(dclass), str(fields)))
+            self._dc_class = dclass
+            self._fields = fields
+            self.request('SetPatternName')
+
+        self.manager.network.database_interface.query_object(self.client.channel,
+            types.DATABASE_CHANNEL,
+            self._avatar_id,
+            response,
+            self.manager.network.dc_loader.dclasses_by_name['DistributedToon'])
+
+    def exitStart(self):
+        self.notify.debug("SetNamePatternFSM.exitQuery()")
+
+    def enterSetPatternName(self):
+        self.notify.debug("SetNamePatternFSM.enterSetPatternName()")
+        
+        nameGenerator = NameGenerator()
+        
+        # Render the pattern into a string:
+        parts = []
+        for p, f in self._pattern:
+            part = nameGenerator.nameDictionary.get(p, ('', ''))[1]
+            if f:
+                part = part[:1].upper() + part[1:]
+            else:
+                part = part.lower()
+            parts.append(part)
+
+        parts[2] += parts.pop(3)  # Merge 2&3 (the last name) as there should be no space.
+        while '' in parts:
+            parts.remove('')
+        name = ' '.join(parts)
+        
+        del nameGenerator
+
+        new_fields = {
+             'setName': (name,)
+        }
+
+        #self.notify.warning("New fields are \n%s" % (str(self._fields)))
+
+        self.manager.network.database_interface.update_object(self.client.channel,
+            types.DATABASE_CHANNEL,
+            self._avatar_id,
+            self.manager.network.dc_loader.dclasses_by_name['DistributedToon'],
+            new_fields)
+
+        # We're all done
+        self.cleanup(True, self._avatar_id)
+
+    def exitSetPatternName(self):
+        self.notify.debug("SetNamePatternFSM.exitSetPatternName()")
 
 class GetAvatarDetailsFSM(ClientOperation):
     notify = notify.new_category('GetAvatarDetailsFSM')
