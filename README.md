@@ -4,4 +4,4 @@ OTP server implementation designed specifically for the 2003 historical version 
 
 # License
 
-Toontown OTP is licensed under the "BSD 3-Clause License" for more info, refer to the [LICENSE](LICENSE) file.
+Toontown OTP is licensed under the "MIT License" for more info, refer to the [LICENSE](LICENSE) file.
