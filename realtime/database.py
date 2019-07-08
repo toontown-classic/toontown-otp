@@ -531,26 +531,24 @@ class DatabaseRetrieveFSM(DatabaseOperationFSM):
         DatabaseOperationFSM.__init__(self, *args, **kwargs)
 
     def enterStart(self):
+        if self._do_id == 0:
+            self.notify.warning('Failed to get fields for object: %d context: %d, unknown object!' % (do_id, self._context))
+            return
+            
         file_object = self.network.backend.add_file('%d' % self._do_id)
         if not file_object:
-            self.notify.warning('Failed to get fields for object: %d context: %d, unknown object!' % (
-                do_id, self._context))
-
+            self.notify.warning('Failed to get fields for object: %d context: %d, unknown object!' % (do_id, self._context))
             return
 
         dc_name = file_object.get_value('dclass')
         self._dc_class = self.network.dc_loader.dclasses_by_name.get(dc_name)
         if not self._dc_class:
-            self.notify.warning('Failed to query object: %d context: %d, unknown dclass: %s!' % (
-                self._do_id, self._context, dc_name))
-
+            self.notify.warning('Failed to query object: %d context: %d, unknown dclass: %s!' % (self._do_id, self._context, dc_name))
             return
 
         self._fields = file_object.get_value('fields')
         if not self._fields:
-            self.notify.warning('Failed to query object: %d context %d, invalid fields!' % (
-                self._do_id, self._context))
-
+            self.notify.warning('Failed to query object: %d context %d, invalid fields!' % (self._do_id, self._context))
             return
 
         self.network.backend.remove_file(file_object)
