@@ -178,6 +178,8 @@ class DatabaseJSONFile(DatabaseFile):
             io.close()
 
     def handle_load(self):
+        if self.filepath == 'databases/json\\0.json':
+            return
         with open(self.filepath, 'r') as io:
             self._data = simplejson.load(io)
             io.close()
