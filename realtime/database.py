@@ -530,12 +530,12 @@ class DatabaseRetrieveFSM(DatabaseOperationFSM):
 
     def enterStart(self):
         if self._do_id == 0:
-            self.notify.warning('Failed to get fields for object: %d context: %d, unknown object!' % (do_id, self._context))
+            self.notify.warning('Failed to get fields for object: %d context: %d, unknown object!' % (self._do_id, self._context))
             return
             
         file_object = self.network.backend.add_file('%d' % self._do_id)
         if not file_object:
-            self.notify.warning('Failed to get fields for object: %d context: %d, unknown object!' % (do_id, self._context))
+            self.notify.warning('Failed to get fields for object: %d context: %d, unknown object!' % (self._do_id, self._context))
             return
 
         dc_name = file_object.get_value('dclass')
