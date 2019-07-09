@@ -65,9 +65,7 @@ class DatabaseFile(object):
 
     @filename.setter
     def filename(self, filename):
-        if self._filename == filename:
-            raise DatabaseError('Cannot set filename to of which did not change!')
-
+        assert(filename != self._filename)
         self._filename = filename
 
     @property
@@ -80,9 +78,7 @@ class DatabaseFile(object):
 
     @data.setter
     def data(self, data):
-        if not isinstance(data, dict):
-            raise DatabaseError('Cannot set data property to of invalid type!')
-
+        assert(isinstance(data, dict))
         self._data = data
 
     def setup(self):
@@ -255,8 +251,7 @@ class DatabaseManager(object):
         """
 
         if self.has_file(filename):
-            raise DatabaseError('Cannot open file: %s, file already open!' % (
-                filename))
+            raise DatabaseError('Cannot open file: %s, file already open!' % filename)
 
         file_object = self._file_object_handler(self)
         file_object.filename = filename
@@ -395,7 +390,9 @@ class DatabaseOperationManager(object):
 
     def __init__(self):
         self._operations = collections.deque()
-        self.__update_task = None
+
+        self._flush_timeout = config.GetFloat('database-flush-timeout', 0.001)
+        self.__flush_task = None
 
     @property
     def operations(self):
@@ -406,27 +403,25 @@ class DatabaseOperationManager(object):
         self._operations.append(operation)
 
     def setup(self):
-        self.__update_task = task_mgr.add(self.__update, 'database-update')
+        self.__flush_task = task_mgr.doMethodLater(self._flush_timeout, self.__flush, 'database-flush')
 
-    def __update(self, task):
+    def __flush(self, task):
         """
         Gets an database operation from the queue and processes it...
         """
 
-        if not len(self._operations):
-            return task.cont
+        if len(self._operations) > 0:
+            operation = self._operations.popleft()
+            operation.request('Start')
 
-        operation = self._operations.popleft()
-        operation.request('Start')
-
-        return task.cont
+        return task.again
 
     def shutdown(self):
-        if self.__update_task:
-            task_mgr.remove(self.__update_task)
+        if self.__flush_task:
+            task_mgr.remove(self.__flush_task)
+            self.__flush_task = None
 
         self._operations = None
-        self.__update_task = None
 
 class DatabaseCreateFSM(DatabaseOperationFSM):
     notify = notify.new_category('DatabaseCreateFSM')
@@ -442,8 +437,8 @@ class DatabaseCreateFSM(DatabaseOperationFSM):
     def enterStart(self):
         dc_class = self.network.dc_loader.dclasses_by_number.get(self._dc_id)
         if not dc_class:
-            self.notify.error('Failed to create object: %d context: %d, unknown dclass!' % (
-                self._dc_id, self._context))
+            self.notify.error('Failed to create object: %d context: %d, '
+                'unknown dclass!' % (self._dc_id, self._context))
 
         self._do_id = self.network.backend.allocator.allocate()
         file_object = self.network.backend.add_file('%d' % self._do_id)
@@ -460,15 +455,15 @@ class DatabaseCreateFSM(DatabaseOperationFSM):
             field_id = field_packer.raw_unpack_uint16()
             field = dc_class.get_field_by_index(field_id)
             if not field:
-                self.notify.error('Failed to unpack field: %d dclass: %s, invalid field!' % (
-                    field_id, dc_class.get_name()))
+                self.notify.error('Failed to unpack field: %d dclass: %s, '
+                    'invalid field!' % (field_id, dc_class.get_name()))
 
             field_packer.begin_unpack(field)
             field_args = field.unpack_args(field_packer)
             field_packer.end_unpack()
             if not field_args:
-                self.notify.error('Failed to unpack field args for field: %d dclass: %s, invalid result!' % (
-                    field.get_name(), dc_class.get_name()))
+                self.notify.error('Failed to unpack field args for field: %d dclass: %s, '
+                    'invalid result!' % (field.get_name(), dc_class.get_name()))
 
             fields[field.get_name()] = field_args
 
@@ -487,8 +482,8 @@ class DatabaseCreateFSM(DatabaseOperationFSM):
             field_args = field.unpack_args(field_packer)
             field_packer.end_unpack()
             if not field_args:
-                self.notify.error('Failed to unpack field args for field: %d dclass: %s, invalid result!' % (
-                    field.get_name(), dc_class.get_name()))
+                self.notify.error('Failed to unpack field args for field: %d dclass: %s, '
+                    'invalid result!' % (field.get_name(), dc_class.get_name()))
 
             fields[field.get_name()] = field_args
 
@@ -529,24 +524,32 @@ class DatabaseRetrieveFSM(DatabaseOperationFSM):
         DatabaseOperationFSM.__init__(self, *args, **kwargs)
 
     def enterStart(self):
-        if self._do_id == 0:
-            self.notify.warning('Failed to get fields for object: %d context: %d, unknown object!' % (self._do_id, self._context))
+        if not self._do_id:
+            self.notify.warning('Failed to get fields for object: %d context: %d, '
+                'unknown object!' % (self._do_id, self._context))
+
             return
-            
+
         file_object = self.network.backend.add_file('%d' % self._do_id)
         if not file_object:
-            self.notify.warning('Failed to get fields for object: %d context: %d, unknown object!' % (self._do_id, self._context))
+            self.notify.warning('Failed to get fields for object: %d context: %d, '
+                'unknown object!' % (self._do_id, self._context))
+
             return
 
         dc_name = file_object.get_value('dclass')
         self._dc_class = self.network.dc_loader.dclasses_by_name.get(dc_name)
         if not self._dc_class:
-            self.notify.warning('Failed to query object: %d context: %d, unknown dclass: %s!' % (self._do_id, self._context, dc_name))
+            self.notify.warning('Failed to query object: %d context: %d, '
+                'unknown dclass: %s!' % (self._do_id, self._context, dc_name))
+
             return
 
         self._fields = file_object.get_value('fields')
         if not self._fields:
-            self.notify.warning('Failed to query object: %d context %d, invalid fields!' % (self._do_id, self._context))
+            self.notify.warning('Failed to query object: %d context %d, '
+                'invalid fields!' % (self._do_id, self._context))
+
             return
 
         self.network.backend.remove_file(file_object)
@@ -560,8 +563,8 @@ class DatabaseRetrieveFSM(DatabaseOperationFSM):
         for field_name, field_args in self._fields.items():
             field = self._dc_class.get_field_by_name(field_name)
             if not field:
-                self.notify.warning('Failed to query object %d context: %d, unknown field: %s' % (
-                    do_id, self._context, field_name))
+                self.notify.warning('Failed to query object %d context: %d, '
+                    'unknown field: %s' % (do_id, self._context, field_name))
 
                 return
 
@@ -601,24 +604,20 @@ class DatabaseSetFieldFSM(DatabaseOperationFSM):
     def enterStart(self):
         file_object = self.network.backend.add_file('%d' % self._do_id)
         if not file_object:
-            self.notify.warning('Failed to set fields for object: %d, unknown object!' % (
-                self._do_id))
-
+            self.notify.warning('Failed to set fields for object: %d, unknown object!' % self._do_id)
             return
 
         dc_name = file_object.get_value('dclass')
         dc_class = self.network.dc_loader.dclasses_by_name.get(dc_name)
         if not dc_class:
-            self.notify.warning('Failed to set fields for object: %d, unknown dclass: %s!' % (
-                self._do_id, dc_name))
+            self.notify.warning('Failed to set fields for object: %d, '
+                'unknown dclass: %s!' % (self._do_id, dc_name))
 
             return
 
         fields = file_object.get_value('fields')
         if not fields:
-            self.notify.warning('Failed to set fields for object: %d, invalid fields!' % (
-                self._do_id))
-
+            self.notify.warning('Failed to set fields for object: %d, invalid fields!' % self._do_id)
             return
 
         field_packer = DCPacker()
@@ -626,15 +625,15 @@ class DatabaseSetFieldFSM(DatabaseOperationFSM):
         field_id = field_packer.raw_unpack_uint16()
         field = dc_class.get_field_by_index(field_id)
         if not field:
-            self.notify.error('Failed to unpack field: %d dclass: %s, invalid field!' % (
-                field_id, dc_class.get_name()))
+            self.notify.error('Failed to unpack field: %d dclass: %s, '
+                'invalid field!' % (field_id, dc_class.get_name()))
 
         field_packer.begin_unpack(field)
         field_args = field.unpack_args(field_packer)
         field_packer.end_unpack()
         if not field_args:
-            self.notify.error('Failed to unpack field args for field: %d dclass: %s, invalid result!' % (
-                field.get_name(), dc_class.get_name()))
+            self.notify.error('Failed to unpack field args for field: %d dclass: %s, '
+                'invalid result!' % (field.get_name(), dc_class.get_name()))
 
         fields[field.get_name()] = field_args
         file_object.set_value('fields', fields)
@@ -674,10 +673,10 @@ class DatabaseServer(io.NetworkConnector, component.Component):
         return self._operation_manager
 
     def setup(self):
+        io.NetworkConnector.setup(self)
+
         self._backend.setup()
         self._operation_manager.setup()
-
-        io.NetworkConnector.setup(self)
 
     def handle_datagram(self, channel, sender, message_type, di):
         if message_type == types.DBSERVER_CREATE_OBJECT:
@@ -686,6 +685,8 @@ class DatabaseServer(io.NetworkConnector, component.Component):
             self.handle_object_get_all(sender, di)
         elif message_type == types.DBSERVER_OBJECT_SET_FIELD:
             self.handle_object_set_field(sender, di)
+        else:
+            self.notify.warning('Received unknown message type: %d' % message_type)
 
     def handle_create_object(self, sender, di):
         self._operation_manager.add_operation(DatabaseCreateFSM, self, sender,

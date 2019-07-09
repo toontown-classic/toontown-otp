@@ -37,6 +37,7 @@ database-directory databases/json
 database-extension .json
 database-max-channels 199999999
 database-min-channels 100000000
+database-flush-timeout 0.001
 
 # DClass:
 dc-multiple-inheritance #f
