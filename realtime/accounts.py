@@ -44,6 +44,7 @@ class ClientOperation(FSM):
     notify = notify.new_category('ClientOperation')
 
     def __init__(self, manager, client, callback):
+        self.notify.debug('Starting FSM operation %s!' % (self.__class__.__name__))
         FSM.__init__(self, self.__class__.__name__)
 
         self._manager = manager
@@ -76,6 +77,7 @@ class ClientOperation(FSM):
         return FSM.defaultFilter(self, request, *args)
 
     def cleanup(self, success, *args, **kwargs):
+        self.notify.debug('Stopping operation %s for %s.' % (self.__class__.__name__, self.client))
         self.ignoreAll()
         self.manager.stop_operation(self.client)
         self.demand('Off')
@@ -83,6 +85,8 @@ class ClientOperation(FSM):
         # only initiate callback if the cleanup was successful...
         if self._callback and success:
             self._callback(*args, **kwargs)
+        elif not success:
+            self.notify.warning('Cleanup operation %s was unsuccessful for %s.' % (self.__class__.__name__, self.client))
 
 class ClientOperationManager(object):
     notify = notify.new_category('ClientOperationManager')
@@ -100,19 +104,25 @@ class ClientOperationManager(object):
         return self._channel2fsm
 
     def has_fsm(self, channel):
+        if channel in self._channel2fsm:
+            #print('%s, %s' % (self._channel2fsm[channel] != None, self._channel2fsm[channel].__class__.__name__))
+            return self._channel2fsm[channel] != None
         return channel in self._channel2fsm
 
     def add_fsm(self, channel, fsm):
         if self.has_fsm(channel):
+            self.notify.warning('Cannot add FSM for channel %s, FSM %s is already running!' % (channel, self._channel2fsm[channel].__class__.__name__))
             return
 
         self._channel2fsm[channel] = fsm
 
     def remove_fsm(self, channel):
         if not self.has_fsm(channel):
+            self.notify.warning('Cannot cancel FSM for channel %s, no FSM running!' % (channel))
             return
 
         del self._channel2fsm[channel]
+        self._channel2fsm[channel] = None
 
     def get_fsm(self, channel):
         return self._channel2fsm.get(channel)
@@ -407,6 +417,12 @@ class LoadAvatarFSM(ClientOperation):
             self._dc_class = dclass
             self._fields = fields
             self.request('Activate')
+            
+        if self._avatar_id == 0:
+            self.notify.warning('%s was inproperly initialized! Cleaning up FSM' % (self.__class__.__name__))
+            self.callback = None
+            self.cleanup(False)
+            return
 
         self.manager.network.database_interface.query_object(self.client.channel,
             types.DATABASE_CHANNEL,
