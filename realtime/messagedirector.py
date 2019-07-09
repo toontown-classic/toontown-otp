@@ -66,12 +66,8 @@ class Participant(io.NetworkHandler):
 
     def handle_datagram(self, di):
         channels = di.get_uint8()
-        if channels == 1:
-            self.handle_control_message(di)
-
-    def handle_control_message(self, di):
         channel = di.get_uint64()
-        if channel == types.CONTROL_MESSAGE:
+        if channels == 1 and channel == types.CONTROL_MESSAGE:
             message_type = di.get_uint16()
             sender = di.get_uint64()
 
