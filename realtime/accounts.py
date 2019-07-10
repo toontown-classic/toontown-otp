@@ -417,7 +417,7 @@ class LoadAvatarFSM(ClientOperation):
             self._dc_class = dclass
             self._fields = fields
             self.request('Activate')
-            
+
         if self._avatar_id == 0:
             self.notify.warning('%s was inproperly initialized! Cleaning up FSM' % (self.__class__.__name__))
             self.callback = None
@@ -432,33 +432,33 @@ class LoadAvatarFSM(ClientOperation):
 
     def exitStart(self):
         pass
-        
-    def _handle_activate_avatar(self, task):	
-        # setup a post remove message that will delete the	
-        # client's toon object when they disconnect...	
-        post_remove = io.NetworkDatagram()	
-        post_remove.add_header(self._avatar_id, self.client.channel,	
-            types.STATESERVER_OBJECT_DELETE_RAM)	
 
-        post_remove.add_uint32(self._avatar_id)	
+    def _handle_activate_avatar(self, task):
+        # setup a post remove message that will delete the
+        # client's toon object when they disconnect...
+        post_remove = io.NetworkDatagram()
+        post_remove.add_header(self._avatar_id, self.client.channel,
+            types.STATESERVER_OBJECT_DELETE_RAM)
 
-        datagram = io.NetworkDatagram()	
-        datagram.add_control_header(self.client.allocated_channel,	
-            types.CONTROL_ADD_POST_REMOVE)	
+        post_remove.add_uint32(self._avatar_id)
 
-        datagram.append_data(post_remove.get_message())	
-        self.manager.network.handle_send_connection_datagram(datagram)	
+        datagram = io.NetworkDatagram()
+        datagram.add_control_header(self.client.allocated_channel,
+            types.CONTROL_ADD_POST_REMOVE)
 
-        # grant ownership over the distributed object...	
-        datagram = io.NetworkDatagram()	
-        datagram.add_header(self._avatar_id, self.client.channel,	
-            types.STATESERVER_OBJECT_SET_OWNER)	
+        datagram.append_data(post_remove.get_message())
+        self.manager.network.handle_send_connection_datagram(datagram)
 
-        datagram.add_uint64(self.client.channel)	
-        self.manager.network.handle_send_connection_datagram(datagram)	
+        # grant ownership over the distributed object...
+        datagram = io.NetworkDatagram()
+        datagram.add_header(self._avatar_id, self.client.channel,
+            types.STATESERVER_OBJECT_SET_OWNER)
 
-        # we're all done.	
-        self.cleanup(True, self._avatar_id)	
+        datagram.add_uint64(self.client.channel)
+        self.manager.network.handle_send_connection_datagram(datagram)
+
+        # we're all done.
+        self.cleanup(True, self._avatar_id)
         return task.done
 
     def enterActivate(self):
@@ -482,10 +482,10 @@ class LoadAvatarFSM(ClientOperation):
         sorted_fields = {}
         for field_name, field_args in self._fields.items():
             field = self._dc_class.get_field_by_name(field_name)
-
             if not field:
                 self.notify.warning('Failed to pack fields for object %d, '
                     'unknown field: %s!' % (self._avatar_id, field_name))
+
                 return
 
             sorted_fields[field.get_number()] = field_args
@@ -496,7 +496,6 @@ class LoadAvatarFSM(ClientOperation):
         field_packer = DCPacker()
         for field_index, field_args in sorted_fields.items():
             field = self._dc_class.get_field_by_index(field_index)
-
             if not field:
                 self.notify.error('Failed to pack required field: %d for object %d, '
                     'unknown field!' % (field_index, self._avatar_id))
@@ -598,7 +597,6 @@ class LoadFriendsListFSM(ClientOperation):
 
             # tell us if they are online or not...
             datagram = io.NetworkDatagram()
-
             if friend_online:
                 datagram.add_uint16(types.CLIENT_FRIEND_ONLINE)
             else:
@@ -705,7 +703,7 @@ class SetNameFSM(ClientOperation):
 
     def exitSetName(self):
         self.notify.debug("SetNameFSM.exitSetName()")
-        
+
 class SetNamePatternFSM(ClientOperation):
     notify = notify.new_category('SetNamePatternFSM')
 
@@ -741,9 +739,9 @@ class SetNamePatternFSM(ClientOperation):
 
     def enterSetPatternName(self):
         self.notify.debug("SetNamePatternFSM.enterSetPatternName()")
-        
+
         nameGenerator = NameGenerator()
-        
+
         # Render the pattern into a string:
         parts = []
         for p, f in self._pattern:
@@ -758,7 +756,7 @@ class SetNamePatternFSM(ClientOperation):
         while '' in parts:
             parts.remove('')
         name = ' '.join(parts)
-        
+
         del nameGenerator
 
         new_fields = {
@@ -817,8 +815,8 @@ class GetAvatarDetailsFSM(ClientOperation):
         for field_name, field_args in self._fields.items():
             field = self._dc_class.get_field_by_name(field_name)
             if not field:
-                self.notify.warning('Failed to pack fields for object %d, unknown field: %s!' % (
-                    self._avatar_id, field_name))
+                self.notify.warning('Failed to pack fields for object %d, '
+                    'unknown field: %s!' % (self._avatar_id, field_name))
 
                 self.cleanup(False)
                 return
@@ -832,8 +830,8 @@ class GetAvatarDetailsFSM(ClientOperation):
         for field_index, field_args in sorted_fields.items():
             field = self._dc_class.get_field_by_index(field_index)
             if not field:
-                self.notify.warning('Failed to pack required field: %d for object %d, unknown field!' % (
-                    field_index, self._avatar_id))
+                self.notify.warning('Failed to pack required field: %d for object %d, '
+                    'unknown field!' % (field_index, self._avatar_id))
 
                 self.cleanup(False)
                 return

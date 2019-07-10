@@ -125,7 +125,7 @@ class ParticipantInterface(object):
 
     def add_participant(self, channel, participant):
         if self.has_participant(channel):
-            self.notify.debug('Failed to add participant with channel: %d, '
+            self.notify.warning('Failed to add participant with channel: %d, '
                 'participant already exists!' % channel)
 
             return
@@ -134,7 +134,7 @@ class ParticipantInterface(object):
 
     def remove_participant(self, channel):
         if not self.has_participant(channel):
-            self.notify.debug('Failed to remove participant with channel: %d, '
+            self.notify.warning('Failed to remove participant with channel: %d, '
                 'participant does not exist!' % channel)
 
             return
