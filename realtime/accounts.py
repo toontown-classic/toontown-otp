@@ -376,7 +376,8 @@ class CreateAvatarFSM(ClientOperation):
         fields = {
             'setDNAString': (self._dna_string,),
             'setPosIndex': (self._index,),
-            'setName': ('Toon',)
+            'setName': ('Toon',),
+            'setFriendsList': ([],)
         }
 
         self.manager.network.database_interface.create_object(self.client.channel,
@@ -589,7 +590,7 @@ class LoadFriendsListFSM(ClientOperation):
 
     def enterQueryFriends(self):
         friends_list, = self._fields['setFriendsList']
-        if not friends_list:
+        if friends_list == None:
             self.cleanup(False)
             return
 

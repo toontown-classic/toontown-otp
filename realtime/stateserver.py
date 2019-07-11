@@ -71,7 +71,9 @@ class ShardManager(object):
 
     def get_shard(self, channel):
         return self.shards.get(channel)
-
+        
+    def get_first_shard(self):
+        return self.shards.get(next(iter(self.shards)))
 
 class StateObject(object):
     notify = notify.new_category('StateObject')
@@ -392,10 +394,11 @@ class StateObject(object):
 
         shard = self._network.shard_manager.get_shard(new_ai_channel)
         if not shard:
-            self.notify.warning('Failed to set new AI: %d for object %d, '
-                'no AI was found with that channel!' % (new_ai_channel, self._do_id))
-
-            return
+            firstShard = self._network.shard_manager.get_first_shard()
+            if not firstShard:
+                self.notify.warning('Failed to set new AI: %d for object %d, ' 'no AI was found with that channel!' % (new_ai_channel, self._do_id))
+                return
+            shard = firstShard
 
         self.ai_channel = new_ai_channel
         if self._owner_id:
