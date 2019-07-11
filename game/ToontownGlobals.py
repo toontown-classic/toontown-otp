@@ -1,5 +1,6 @@
 from panda3d.core import *
 
+
 MaxFriends = 50
 FriendChat = 1
 CommonChat = 1
@@ -40,13 +41,17 @@ OakStreet = 5300
 LullabyLane = 9100
 PajamaPlace = 9200
 ToonHall = 2513
-HoodHierarchy = {ToontownCentral: (SillyStreet, LoopyLane, PunchlinePlace),
- DonaldsDock: (BarnacleBoulevard, SeaweedStreet, LighthouseLane),
- TheBrrrgh: (WalrusWay, SleetStreet, PolarPlace),
- MinniesMelodyland: (AltoAvenue, BaritoneBoulevard, TenorTerrace),
- DaisyGardens: (ElmStreet, MapleStreet, OakStreet),
- DonaldsDreamland: (LullabyLane, PajamaPlace),
- GoofySpeedway: ()}
+
+HoodHierarchy = {
+    ToontownCentral: (SillyStreet, LoopyLane, PunchlinePlace),
+    DonaldsDock: (BarnacleBoulevard, SeaweedStreet, LighthouseLane),
+    TheBrrrgh: (WalrusWay, SleetStreet, PolarPlace),
+    MinniesMelodyland: (AltoAvenue, BaritoneBoulevard, TenorTerrace),
+    DaisyGardens: (ElmStreet, MapleStreet, OakStreet),
+    DonaldsDreamland: (LullabyLane, PajamaPlace),
+    GoofySpeedway: ()
+}
+
 WelcomeValleyToken = 0
 BossbotHQ = 10000
 BossbotLobby = 10100
@@ -106,3 +111,38 @@ MinnieSpeed = 3.2000000000000002
 DonaldSpeed = 3.6800000000000002
 GoofySpeed = 5.2000000000000002
 PlutoSpeed = 5.5
+
+streetPhaseMap = {
+    ToontownCentral: 5,
+    DonaldsDock: 6,
+    MinniesMelodyland: 6,
+    GoofySpeedway: 6,
+    TheBrrrgh: 8,
+    DaisyGardens: 8,
+    FunnyFarm: 8,
+    DonaldsDreamland: 8,
+    OutdoorZone: 8,
+    BossbotHQ: 12,
+    SellbotHQ: 9,
+    CashbotHQ: 10,
+    LawbotHQ: 11,
+    PartyHood: 13
+}
+
+dnaMap = {
+    Tutorial: 'toontown_central',
+    ToontownCentral: 'toontown_central',
+    DonaldsDock: 'donalds_dock',
+    MinniesMelodyland: 'minnies_melody_land',
+    GoofySpeedway: 'goofy_speedway',
+    TheBrrrgh: 'the_burrrgh',
+    DaisyGardens: 'daisys_garden',
+    FunnyFarm: 'not done yet',
+    DonaldsDreamland: 'donalds_dreamland',
+    OutdoorZone: 'outdoor_zone',
+    BossbotHQ: 'cog_hq_bossbot',
+    SellbotHQ: 'cog_hq_sellbot',
+    CashbotHQ: 'cog_hq_cashbot',
+    LawbotHQ: 'cog_hq_lawbot',
+    GolfZone: 'golf_zone'
+}

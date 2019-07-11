@@ -38,12 +38,15 @@ from realtime import component
 from realtime.accounts import *
 
 from game.OtpDoGlobals import *
+from game import genDNAFileName, extractGroupName
 from game import ZoneUtil
+from game.dna.DNAParser import loadDNAFileAI, DNAStorage
+
 
 class InterestManager(object):
 
     def __init__(self):
-        self._interest_zones = []
+        self._interest_zones = set()
 
     @property
     def interest_zones(self):
@@ -56,7 +59,7 @@ class InterestManager(object):
         if zone_id in self._interest_zones:
             return
 
-        self._interest_zones.append(zone_id)
+        self._interest_zones.add(zone_id)
 
     def remove_interest_zone(self, zone_id):
         if zone_id not in self._interest_zones:
@@ -65,7 +68,7 @@ class InterestManager(object):
         self._interest_zones.remove(zone_id)
 
     def clear(self):
-        self._interest_zones = []
+        self._interest_zones = set()
 
 class Client(io.NetworkHandler):
     notify = notify.new_category('Client')
@@ -87,9 +90,7 @@ class Client(io.NetworkHandler):
         self._owned_objects = []
         self._pending_objects = []
 
-        self._in_street_branch = False
-        self._branch_zone = 0
-        self._branch_interest_zones = []
+        self._dna_stores = {}
 
     @property
     def authenticated(self):
@@ -404,12 +405,12 @@ class Client(io.NetworkHandler):
             self.handle_send_disconnect(types.CLIENT_DISCONNECT_TRUNCATED_DATAGRAM,
                 'Received truncated datagram from channel: %d!' % self._channel)
             return
-            
+
         pattern = [(name_indices[0], name_flags[0]), (name_indices[1], name_flags[1]), (name_indices[2], name_flags[2]), (name_indices[3], name_flags[3])]
-        
+
         self.network.account_manager.handle_operation(SetNamePatternFSM, self,
             self.__handle_set_name_pattern_resp, avatar_id, pattern)
-        
+
     def __handle_set_name_pattern_resp(self, avatar_id):
         datagram = io.NetworkDatagram()
         datagram.add_uint16(types.CLIENT_SET_NAME_PATTERN_ANSWER)
@@ -520,72 +521,82 @@ class Client(io.NetworkHandler):
 
         return False
 
+    def get_vis_branch_zones(self, zone_id):
+        branch_zone_id = ZoneUtil.getBranchZone(zone_id)
+        dnaStore = self._dna_stores.get(branch_zone_id)
+        if not dnaStore:
+            dnaStore = DNAStorage()
+            dnaFileName = genDNAFileName(branch_zone_id)
+            loadDNAFileAI(dnaStore, dnaFileName)
+            self._dna_stores[branch_zone_id] = dnaStore
+
+        zoneVisDict = {}
+        for i in xrange(dnaStore.getNumDNAVisGroupsAI()):
+            groupFullName = dnaStore.getDNAVisGroupName(i)
+            visGroup = dnaStore.getDNAVisGroupAI(i)
+            visZoneId = int(extractGroupName(groupFullName))
+            visZoneId = ZoneUtil.getTrueZoneId(visZoneId, zone_id)
+            visibles = []
+            for i in xrange(visGroup.getNumVisibles()):
+                visibles.append(int(visGroup.visibles[i]))
+
+            visibles.append(ZoneUtil.getBranchZone(visZoneId))
+            zoneVisDict[visZoneId] = visibles
+
+        return zoneVisDict[zone_id]
+
     def handle_set_zone_callback(self, do_id, old_parent_id, old_zone_id, new_parent_id, new_zone_id):
-        self._location_deferred_callback.destroy()
-        self._location_deferred_callback = None
+        if self._location_deferred_callback:
+            self._location_deferred_callback.destroy()
+            self._location_deferred_callback = None
 
-        # update the client's interest zones
-        avatar_id = self.get_avatar_id_from_connection_channel(self.channel)
-        if not self.get_in_street_branch(new_zone_id):
-            if self._in_street_branch:
-                self._interest_manager.remove_interest_zone(self._branch_zone)
-                self._branch_zone = 0
-                for zone_id in self._branch_interest_zones:
-                    # ensure we've cleared the objects in our seen list since
-                    # we are no longer in a street branch...
-                    if zone_id in self._seen_objects:
-                        del self._seen_objects[zone_id]
+        updated_old_branch_zones = False
+        updated_new_branch_zones = False
 
-                    self._interest_manager.remove_interest_zone(zone_id)
+        old_vis_zones = set()
+        if self.get_in_street_branch(old_zone_id):
+            old_vis_zones.update(self.get_vis_branch_zones(old_zone_id))
+            for zone_id in old_vis_zones.difference(old_vis_zones):
+                self._interest_manager.remove_interest_zone(zone_id)
 
-                self._branch_interest_zones = []
-                self._in_street_branch = False
-
-            self._interest_manager.remove_interest_zone(old_zone_id)
+            updated_old_branch_zones = True
         else:
-            if not self._in_street_branch:
-                self._branch_zone = ZoneUtil.getBranchZone(new_zone_id)
-                self._interest_manager.add_interest_zone(self._branch_zone)
-                for zone_id in xrange(self._branch_zone + 1, self._branch_zone + 50):
-                    self._branch_interest_zones.append(zone_id)
-                    self._interest_manager.add_interest_zone(zone_id)
+            self._interest_manager.remove_interest_zone(old_zone_id)
 
-                self._in_street_branch = True
-            else:
-                # request all of the objects in the zones we have interest in,
-                # ignore any street section zones and the street branch zone
-                interest_zones = list(self._interest_manager.interest_zones)
-                if self._in_street_branch and self._branch_zone in interest_zones:
-                    interest_zones.remove(self._branch_zone)
+        new_vis_zones = set()
+        if self.get_in_street_branch(new_zone_id):
+            new_vis_zones.update(self.get_vis_branch_zones(new_zone_id))
+            for zone_id in new_vis_zones.difference(old_vis_zones):
+                self._interest_manager.add_interest_zone(zone_id)
 
-                self.send_get_zones_objects(avatar_id, interest_zones)
-                return
+            updated_new_branch_zones = True
+        else:
+            self._interest_manager.add_interest_zone(new_zone_id)
 
-        self._interest_manager.add_interest_zone(new_zone_id)
+        # clear the dna store for this branch zones since
+        # they have left the street branch
+        if updated_old_branch_zones and not updated_new_branch_zones:
+            branch_zone_id = ZoneUtil.getBranchZone(old_zone_id)
+            del self._dna_stores[branch_zone_id]
 
-        # add interest in our quiet zone, as the quiet zone objects need
-        # to be regenerated once we leave the quiet zone; this is because the client
-        # always deletes it's objects in the previous zones unless they have "OTHER" fields...
-        #if new_zone_id != OTP_ZONE_ID_OLD_QUIET_ZONE:
-        #    self._interest_manager.add_interest_zone(OTP_ZONE_ID_OLD_QUIET_ZONE)
+        # destroy the objects we no longer have interest in
+        for zone_id in dict(self._seen_objects):
+            if self._interest_manager.has_interest_zone(zone_id):
+                continue
 
-        # send delete for all objects we've seen that were in the zone that we've just left...
-        if old_zone_id in self._seen_objects:
-            if old_zone_id != new_zone_id:
-                seen_objects = self._seen_objects[old_zone_id]
-                for do_id in seen_objects:
-                    # we do not want to delete our owned objects...
-                    if do_id not in self._owned_objects:
-                        self.send_client_object_delete_resp(do_id)
+            seen_objects = list(self._seen_objects[zone_id])
+            for do_id in seen_objects:
+                if do_id in self._owned_objects:
+                    continue
 
-                # remove the array assigned to the zone if it's there...
-                if old_zone_id in self._seen_objects:
-                    del self._seen_objects[old_zone_id]
+                self.remove_seen_object(do_id)
+                self.send_client_object_delete_resp(do_id)
 
         self._generate_deferred_callback = util.DeferredCallback(self.handle_set_zone_complete_callback,
             old_parent_id, old_zone_id, new_parent_id, new_zone_id)
 
         # request all of the objects in the zones we have interest in
+        avatar_id = self.get_avatar_id_from_connection_channel(self.channel)
         interest_zones = list(self._interest_manager.interest_zones)
         self.send_get_zones_objects(avatar_id, interest_zones)
 
