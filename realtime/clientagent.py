@@ -230,24 +230,26 @@ class Client(io.NetworkHandler):
         except:
             self.handle_send_disconnect(types.CLIENT_DISCONNECT_TRUNCATED_DATAGRAM,
                 'Received truncated datagram from channel: %d!' % self._channel)
+
             return
 
         if server_version != self.network.server_version:
             self.handle_send_disconnect(types.CLIENT_DISCONNECT_BAD_VERSION,
                 'Invalid server version: %s, expected: %s!' % (server_version, self.network.server_version))
+
             return
 
         if hash_val != self.network.server_hash_val:
             self.handle_send_disconnect(types.CLIENT_DISCONNECT_BAD_DCHASH,
                 'Got an invalid DC hash value: %d expected: %d!' % (hash_val, self.network.server_hash_val))
+
             return
 
         if token_type != types.CLIENT_LOGIN_2_BLUE and token_type != CLIENT_LOGIN_2_PLAY_TOKEN:
             self.handle_send_disconnect(types.CLIENT_DISCONNECT_INVALID_PLAY_TOKEN_TYPE, 'Invalid play token type: %d!' % token_type)
             return
 
-        callback = lambda: self.__handle_login_resp(play_token)
-        self.network.account_manager.handle_operation(LoadAccountFSM, self, callback, play_token)
+        self.network.account_manager.handle_operation(LoadAccountFSM, self, self.__handle_login_resp, play_token)
 
     def __handle_login_resp(self, play_token):
         datagram = io.NetworkDatagram()
@@ -406,7 +408,11 @@ class Client(io.NetworkHandler):
                 'Received truncated datagram from channel: %d!' % self._channel)
             return
 
-        pattern = [(name_indices[0], name_flags[0]), (name_indices[1], name_flags[1]), (name_indices[2], name_flags[2]), (name_indices[3], name_flags[3])]
+        pattern = [
+            (name_indices[0], name_flags[0]),
+            (name_indices[1], name_flags[1]),
+            (name_indices[2], name_flags[2]),
+            (name_indices[3], name_flags[3])]
 
         self.network.account_manager.handle_operation(SetNamePatternFSM, self,
             self.__handle_set_name_pattern_resp, avatar_id, pattern)
@@ -839,7 +845,7 @@ class Client(io.NetworkHandler):
         self.send_client_object_delete_resp(do_id)
 
     def shutdown(self):
-        if self.network.account_manager.has_fsm(self.channel):
+        if self.network.account_manager.has_fsm(self.allocated_channel):
             self.network.account_manager.stop_operation(self)
 
         if self.allocated_channel:

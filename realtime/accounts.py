@@ -107,18 +107,21 @@ class ClientOperationManager(object):
         if channel in self._channel2fsm:
             #print('%s, %s' % (self._channel2fsm[channel] != None, self._channel2fsm[channel].__class__.__name__))
             return self._channel2fsm[channel] != None
+
         return channel in self._channel2fsm
 
     def add_fsm(self, channel, fsm):
         if self.has_fsm(channel):
-            self.notify.warning('Cannot add FSM for channel %s, FSM %s is already running!' % (channel, self._channel2fsm[channel].__class__.__name__))
+            self.notify.warning('Cannot add FSM for channel %s, '
+                'FSM %s is already running!' % (channel, self._channel2fsm[channel].__class__.__name__))
+
             return
 
         self._channel2fsm[channel] = fsm
 
     def remove_fsm(self, channel):
         if not self.has_fsm(channel):
-            self.notify.warning('Cannot cancel FSM for channel %s, no FSM running!' % (channel))
+            self.notify.warning('Cannot cancel FSM for channel %s, no FSM running!' % channel)
             return
 
         del self._channel2fsm[channel]
@@ -140,8 +143,8 @@ class ClientOperationManager(object):
 
     def stop_operation(self, client):
         if not self.has_fsm(client.allocated_channel):
-            self.notify.warning('Cannot stop operation for channel %d, unknown operation!' % (
-                client.channel))
+            self.notify.warning('Cannot stop operation for channel %d, '
+                'unknown operation!' % client.channel)
 
             return
 
@@ -176,6 +179,7 @@ class LoadAccountFSM(ClientOperation):
             self.notify.warning('Failed to load account: %d for channel: %d playtoken: %s!' % (
                 self._account_id, self._client.channel, self._play_token))
 
+            self.cleanup(False)
             return
 
         self.request('SetAccount')
@@ -207,8 +211,8 @@ class LoadAccountFSM(ClientOperation):
     def __account_created(self, account_id):
         self._account_id = account_id
         if not self._account_id:
-            self.notify.warning('Failed to create account for channel: %d playtoken: %s!' % (
-                self._client.channel, self._play_token))
+            self.notify.warning('Failed to create account for channel: '
+                '%d playtoken: %s!' % (self._client.channel, self._play_token))
 
             self.cleanup(False)
             return
@@ -222,20 +226,29 @@ class LoadAccountFSM(ClientOperation):
         pass
 
     def enterSetAccount(self):
-        # the server says our login request was successful,
-        # it is now ok to mark the client as authenticated...
+        # mark them as been authenticated
         self._client.authenticated = True
 
         # add this connection to the account channel
         channel = self.client.get_account_connection_channel(self._account_id)
         self.client.register_for_channel(channel)
 
+        post_remove = io.NetworkDatagram()
+        post_remove.add_control_header(channel, types.CONTROL_REMOVE_CHANNEL)
+
+        datagram = io.NetworkDatagram()
+        datagram.add_control_header(self.client.allocated_channel,
+            types.CONTROL_ADD_POST_REMOVE)
+
+        datagram.append_data(post_remove.get_message())
+        self.manager.network.handle_send_connection_datagram(datagram)
+
         # add them to the account channel
         channel = self._account_id << 32
         self.client.handle_set_channel_id(channel)
 
         # we're all done.
-        self.cleanup(True)
+        self.cleanup(True, self._play_token)
 
     def exitSetAccount(self):
         pass
@@ -443,7 +456,7 @@ class LoadAvatarFSM(ClientOperation):
         post_remove.add_uint32(self._avatar_id)
 
         datagram = io.NetworkDatagram()
-        datagram.add_control_header(self.client.allocated_channel,
+        datagram.add_control_header(self.client.channel,
             types.CONTROL_ADD_POST_REMOVE)
 
         datagram.append_data(post_remove.get_message())
@@ -465,6 +478,16 @@ class LoadAvatarFSM(ClientOperation):
         # add them to the avatar channel
         channel = self.client.get_puppet_connection_channel(self._avatar_id)
         self.client.register_for_channel(channel)
+
+        post_remove = io.NetworkDatagram()
+        post_remove.add_control_header(channel, types.CONTROL_REMOVE_CHANNEL)
+
+        datagram = io.NetworkDatagram()
+        datagram.add_control_header(self.client.allocated_channel,
+            types.CONTROL_ADD_POST_REMOVE)
+
+        datagram.append_data(post_remove.get_message())
+        self.manager.network.handle_send_connection_datagram(datagram)
 
         # set their sender channel to represent their account affiliation
         channel = self._account_id << 32 | self._avatar_id

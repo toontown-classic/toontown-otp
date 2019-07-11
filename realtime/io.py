@@ -342,15 +342,15 @@ class NetworkConnector(NetworkManager):
 class NetworkHandler(NetworkManager):
     notify = notify.new_category('NetworkHandler')
 
-    def __init__(self, network, rendezvous, address, connection, channel=0):
+    def __init__(self, network, rendezvous, address, connection):
         self._network = network
         self._rendezvous = rendezvous
         self._address = address
         self._connection = connection
 
         self._old_channel = 0
-        self._channel = channel
-        self._allocated_channel = channel
+        self._channel = 0
+        self._allocated_channel = 0
 
         self._readable = collections.deque()
 
@@ -431,7 +431,7 @@ class NetworkHandler(NetworkManager):
         if self._old_channel and self._old_channel != self._allocated_channel:
             self.unregister_for_channel(self._old_channel)
 
-        self._channel = channel
+        self.channel = channel
 
     def __update(self, task):
         """
@@ -474,17 +474,14 @@ class NetworkHandler(NetworkManager):
         Disconnects our client socket instance
         """
 
-        self._network.handle_disconnect()
+        self._network.handle_disconnect_handler(self)
 
     def handle_disconnected(self):
         """
         Handles disconnection when the socket connection closes
         """
 
-        try:
-            self._network.handle_disconnected(self)
-        except:
-            self._network.handle_disconnected()
+        self._network.handle_disconnected_handler(self)
 
     def shutdown(self):
         if self._old_channel:
@@ -686,14 +683,14 @@ class NetworkListener(NetworkManager):
     def handle_send_connection_datagram(self, datagram):
         pass
 
-    def handle_disconnect(self, handler):
+    def handle_disconnect_handler(self, handler):
         """
         Disconnects the handlers client socket instance
         """
 
         self.__manager.close_connection(handler.connection)
 
-    def handle_disconnected(self, handler):
+    def handle_disconnected_handler(self, handler):
         """
         Handles disconnection of a client socket instance
         """

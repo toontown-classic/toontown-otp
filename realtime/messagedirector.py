@@ -319,7 +319,7 @@ class MessageInterface(object):
 
         participant = self._network.interface.get_participant(channel)
         if not participant:
-            self.notify.debug('Failed to flush post message handles, '
+            self.notify.warning('Failed to flush post message handles, '
                 'unknown participant with channel: %d!' % channel)
 
             return
