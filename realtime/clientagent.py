@@ -568,6 +568,8 @@ class Client(io.NetworkHandler):
             updated_old_branch_zones = True
         else:
             self._interest_manager.remove_interest_zone(old_zone_id)
+            if old_zone_id != OTP_ZONE_ID_OLD_QUIET_ZONE:
+                self._interest_manager.remove_interest_zone(OTP_ZONE_ID_OLD_QUIET_ZONE)
 
         new_vis_zones = set()
         if self.get_in_street_branch(new_zone_id):
@@ -578,6 +580,8 @@ class Client(io.NetworkHandler):
             updated_new_branch_zones = True
         else:
             self._interest_manager.add_interest_zone(new_zone_id)
+            if new_zone_id != OTP_ZONE_ID_OLD_QUIET_ZONE:
+                self._interest_manager.add_interest_zone(OTP_ZONE_ID_OLD_QUIET_ZONE)
 
         # clear the dna store for this branch zones since
         # they have left the street branch
@@ -836,10 +840,6 @@ class Client(io.NetworkHandler):
             return
 
         if do_id in self._owned_objects:
-            return
-
-        zone_id = self.get_seen_object_zone(do_id)
-        if zone_id == OTP_ZONE_ID_OLD_QUIET_ZONE:
             return
 
         self.send_client_object_delete_resp(do_id)
