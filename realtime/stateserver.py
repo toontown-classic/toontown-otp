@@ -262,7 +262,7 @@ class StateObject(object):
             self._required_fields.items()))
 
         field_packer = DCPacker()
-        for field_index, field_args in list(sorted_fields.items()):
+        for field_index, field_args in sorted_fields.items():
             field = self._dc_class.get_field_by_index(field_index)
             if not field:
                 self.notify.error('Failed to append required data for field: %d '
