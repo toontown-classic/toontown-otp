@@ -592,20 +592,12 @@ class DatabaseSetFieldFSM(DatabaseOperationFSM):
         DatabaseOperationFSM.__init__(self, *args, **kwargs)
 
     def enterStart(self):
-        field_packer = DCPacker()
-        field_packer.set_unpack_data(self._field_data)
-        field_id = field_packer.raw_unpack_uint16()
-        field = dc_class.get_field_by_index(field_id)
-        if not field:
-            self.notify.error('Failed to unpack field: %d dclass: %s, '
-                'invalid field!' % (field_id, dc_class.get_name()))
-
         file_object = self.network.backend.open_file('%d' % self._do_id)
         if not file_object:
             self.notify.warning('Failed to set fields for object: %d, '
                 'unknown object!' % self._do_id)
 
-            self.cleanup(False, self._context, field_id, self._field_data)
+            self.cleanup(False, self._context, None, None)
             return
 
         dc_name = file_object.get_value('dclass')
@@ -614,8 +606,16 @@ class DatabaseSetFieldFSM(DatabaseOperationFSM):
             self.notify.warning('Failed to set fields for object: %d, '
                 'unknown dclass: %s!' % (self._do_id, dc_name))
 
-            self.cleanup(False, self._context, field_id, self._field_data)
+            self.cleanup(False, self._context, None, None)
             return
+
+        field_packer = DCPacker()
+        field_packer.set_unpack_data(self._field_data)
+        field_id = field_packer.raw_unpack_uint16()
+        field = dc_class.get_field_by_index(field_id)
+        if not field:
+            self.notify.error('Failed to unpack field: %d dclass: %s, '
+                'invalid field!' % (field_id, dc_class.get_name()))
 
         fields = file_object.get_value('fields')
         if not fields:
@@ -731,17 +731,20 @@ class DatabaseServer(io.NetworkConnector, component.Component):
         datagram.add_uint32(context)
         datagram.add_uint8(success)
         if not success:
-            field_packer = DCPacker()
-            field = self._dc_class.get_field_by_index(field_id)
-            assert(field is not None)
+            if field_id is not None:
+                field_packer = DCPacker()
+                field = self._dc_class.get_field_by_index(field_id)
+                assert(field is not None)
 
-            field_packer.raw_pack_uint16(field_id)
-            field_packer.begin_pack(field)
-            field.pack_args(field_packer, field_data)
-            field_packer.end_pack()
+                field_packer.raw_pack_uint16(field_id)
+                field_packer.begin_pack(field)
+                field.pack_args(field_packer, field_data)
+                field_packer.end_pack()
 
-            datagram.add_uint16(1)
-            datagram.append_data(field_packer.get_string())
+                datagram.add_uint16(1)
+                datagram.append_data(field_packer.get_string())
+            else:
+                datagram.add_uint16(0)
 
         self.handle_send_connection_datagram(datagram)
 
