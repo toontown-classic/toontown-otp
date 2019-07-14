@@ -57,7 +57,7 @@ class DatabaseFile(object):
         self._database_manager = database_manager
         self._filename = None
         self._data = {}
-        self._mutex_lock = threading.RLock()
+        self._file_lock = threading.RLock()
 
     @property
     def filename(self):
@@ -131,7 +131,7 @@ class DatabaseFile(object):
         so the process is thread safe...
         """
 
-        with self._mutex_lock:
+        with self._file_lock:
             self.handle_save()
 
     def handle_save(self):
@@ -145,7 +145,7 @@ class DatabaseFile(object):
         so the process is thread safe...
         """
 
-        with self._mutex_lock:
+        with self._file_lock:
             self.handle_load()
 
     def handle_load(self):
@@ -164,7 +164,7 @@ class DatabaseFile(object):
         self._database_manager = None
         self._filename = None
         self._data = None
-        self._mutex_lock = None
+        self._file_lock = None
 
 class DatabaseJSONFile(DatabaseFile):
 
@@ -244,7 +244,7 @@ class DatabaseManager(object):
 
         return filename in self._files
 
-    def add_file(self, filename, *args, **kwargs):
+    def open_file(self, filename, *args, **kwargs):
         """
         Creates a new file instance in memory and loads the corresponding
         file object from disk, placing the data in memory
@@ -261,15 +261,14 @@ class DatabaseManager(object):
 
         return file_object
 
-    def remove_file(self, file_object):
+    def close_file(self, file_object):
         """
         Removes a file instance in memory and closes the file,
         saving the data from memory to disk
         """
 
         if not self.has_file(file_object.filename):
-            raise DatabaseError('Cannot close file: %s, file was never opened!' % (
-                filename))
+            raise DatabaseError('Cannot close file: %s, file was never opened!' % filename)
 
         del self._files[file_object.filename]
         file_object.close()
@@ -297,7 +296,7 @@ class DatabaseManager(object):
         """
 
         for filename, file_object in self._files.items():
-            self.remove_file(file_object)
+            self.close_file(file_object)
 
 class DatabaseInterface(DatabaseManager):
 
@@ -326,7 +325,7 @@ class DatabaseInterface(DatabaseManager):
     def setup(self):
         DatabaseManager.setup(self)
 
-        self._tracker = self.add_file(self._tracker_filename)
+        self._tracker = self.open_file(self._tracker_filename)
         self._tracker.save()
 
         self._min_id = self._tracker.set_default_value('next', self._min_id)
@@ -358,11 +357,12 @@ class DatabaseTOMLBackend(DatabaseInterface):
 class DatabaseOperationFSM(FSM):
     notify = notify.new_category('DatabaseOperationFSM')
 
-    def __init__(self, network, sender):
+    def __init__(self, network, sender, callback=None):
         FSM.__init__(self, self.__class__.__name__)
 
         self._network = network
         self._sender = sender
+        self._callback = callback
 
     @property
     def network(self):
@@ -372,18 +372,28 @@ class DatabaseOperationFSM(FSM):
     def sender(self):
         return self._sender
 
+    @property
+    def callback(self):
+        return self._callback
+
+    def enterOff(self):
+        pass
+
+    def exitOff(self):
+        pass
+
     def enterStart(self):
-        self.demand('Stop')
+        pass
 
     def exitStart(self):
         pass
 
-    def enterStop(self):
+    def cleanup(self, success, *args, **kwargs):
+        self.ignoreAll()
         self.demand('Off')
 
-    def exitStop(self):
-        self._network = None
-        self._sender = None
+        if self.callback:
+            self.callback(success, self._sender, *args, **kwargs)
 
 class DatabaseOperationManager(object):
     notify = notify.new_category('DatabaseOperationManager')
@@ -441,7 +451,21 @@ class DatabaseCreateFSM(DatabaseOperationFSM):
                 'unknown dclass!' % (self._dc_id, self._context))
 
         self._do_id = self.network.backend.allocator.allocate()
-        file_object = self.network.backend.add_file('%d' % self._do_id)
+        if not self._do_id:
+            self.notify.warning('Failed to create object: %d context: %d, '
+                'could not allocate new do_id!' % (self._dc_class, self._context))
+
+            self.cleanup(False, self._context, 0)
+            return
+
+        if self.network.backend.has_file('%d' % self._do_id):
+            self.notify.warning('Failed to create object: %d context: %d, '
+                'could not create new entry with same do_id: %d!' % (self._dc_class, self._context, self._do_id))
+
+            self.cleanup(False, self._context, 0)
+            return
+
+        file_object = self.network.backend.open_file('%d' % self._do_id)
         file_object.save()
 
         file_object.set_value('dclass', dc_class.get_name())
@@ -488,31 +512,12 @@ class DatabaseCreateFSM(DatabaseOperationFSM):
             fields[field.get_name()] = field_args
 
         file_object.set_value('fields', fields)
-
-        self.network.backend.remove_file(file_object)
+        self.network.backend.close_file(file_object)
         self.network.backend.tracker.set_value('next', self._do_id + 1)
-        DatabaseOperationFSM.enterStart(self)
+        self.cleanup(True, self._context, self._do_id)
 
     def exitStart(self):
         pass
-
-    def enterStop(self):
-        datagram = io.NetworkDatagram()
-        datagram.add_header(self.sender, self.network.channel,
-            types.DBSERVER_CREATE_OBJECT_RESP)
-
-        datagram.add_uint32(self._context)
-        datagram.add_uint32(self._do_id)
-
-        self.network.handle_send_connection_datagram(datagram)
-        DatabaseOperationFSM.enterStop(self)
-
-    def exitStop(self):
-        self._context = None
-        self._dc_id = None
-        self._field_count = None
-        self._field_data = None
-        self._do_id = None
 
 class DatabaseRetrieveFSM(DatabaseOperationFSM):
     notify = notify.new_category('DatabaseRetrieveFSM')
@@ -528,13 +533,15 @@ class DatabaseRetrieveFSM(DatabaseOperationFSM):
             self.notify.warning('Failed to get fields for object: %d context: %d, '
                 'unknown object!' % (self._do_id, self._context))
 
+            self.cleanup(False, self._context, 0, 0, None)
             return
 
-        file_object = self.network.backend.add_file('%d' % self._do_id)
+        file_object = self.network.backend.open_file('%d' % self._do_id)
         if not file_object:
             self.notify.warning('Failed to get fields for object: %d context: %d, '
                 'unknown object!' % (self._do_id, self._context))
 
+            self.cleanup(False, self._context, 0, 0, None)
             return
 
         dc_name = file_object.get_value('dclass')
@@ -543,6 +550,7 @@ class DatabaseRetrieveFSM(DatabaseOperationFSM):
             self.notify.warning('Failed to query object: %d context: %d, '
                 'unknown dclass: %s!' % (self._do_id, self._context, dc_name))
 
+            self.cleanup(False, self._context, 0, 0, None)
             return
 
         self._fields = file_object.get_value('fields')
@@ -550,15 +558,10 @@ class DatabaseRetrieveFSM(DatabaseOperationFSM):
             self.notify.warning('Failed to query object: %d context %d, '
                 'invalid fields!' % (self._do_id, self._context))
 
+            self.cleanup(False, self._context, 0, 0, None)
             return
 
-        self.network.backend.remove_file(file_object)
-        DatabaseOperationFSM.enterStart(self)
-
-    def exitStart(self):
-        pass
-
-    def enterStop(self):
+        self.network.backend.close_file(file_object)
         field_packer = DCPacker()
         for field_name, field_args in self._fields.items():
             field = self._dc_class.get_field_by_name(field_name)
@@ -573,24 +576,10 @@ class DatabaseRetrieveFSM(DatabaseOperationFSM):
             field.pack_args(field_packer, field_args)
             field_packer.end_pack()
 
-        datagram = io.NetworkDatagram()
-        datagram.add_header(self.sender, self.network.channel,
-            types.DBSERVER_OBJECT_GET_ALL_RESP)
+        self.cleanup(True, self._context, self._dc_class.get_number(), len(self._fields), field_packer)
 
-        datagram.add_uint32(self._context)
-        datagram.add_uint8(1)
-        datagram.add_uint16(self._dc_class.get_number())
-        datagram.add_uint16(len(self._fields))
-
-        datagram.append_data(field_packer.get_string())
-        self.network.handle_send_connection_datagram(datagram)
-        DatabaseOperationFSM.enterStop(self)
-
-    def exitStop(self):
-        self._context = None
-        self._do_id = None
-        self._dc_class = None
-        self._fields = None
+    def exitStart(self):
+        pass
 
 class DatabaseSetFieldFSM(DatabaseOperationFSM):
     notify = notify.new_category('DatabaseSetFieldFSM')
@@ -602,9 +591,12 @@ class DatabaseSetFieldFSM(DatabaseOperationFSM):
         DatabaseOperationFSM.__init__(self, *args, **kwargs)
 
     def enterStart(self):
-        file_object = self.network.backend.add_file('%d' % self._do_id)
+        file_object = self.network.backend.open_file('%d' % self._do_id)
         if not file_object:
-            self.notify.warning('Failed to set fields for object: %d, unknown object!' % self._do_id)
+            self.notify.warning('Failed to set fields for object: %d, '
+                'unknown object!' % self._do_id)
+
+            self.cleanup(False, 0, None)
             return
 
         dc_name = file_object.get_value('dclass')
@@ -613,11 +605,15 @@ class DatabaseSetFieldFSM(DatabaseOperationFSM):
             self.notify.warning('Failed to set fields for object: %d, '
                 'unknown dclass: %s!' % (self._do_id, dc_name))
 
+            self.cleanup(False, 0, None)
             return
 
         fields = file_object.get_value('fields')
         if not fields:
-            self.notify.warning('Failed to set fields for object: %d, invalid fields!' % self._do_id)
+            self.notify.warning('Failed to set fields for object: %d, '
+                'invalid fields!' % self._do_id)
+
+            self.cleanup(False, 0, None)
             return
 
         field_packer = DCPacker()
@@ -638,18 +634,11 @@ class DatabaseSetFieldFSM(DatabaseOperationFSM):
         fields[field.get_name()] = field_args
         file_object.set_value('fields', fields)
 
-        self.network.backend.remove_file(file_object)
-        DatabaseOperationFSM.enterStart(self)
+        self.network.backend.close_file(file_object)
+        self.cleanup(True, field_id, self._field_data)
 
     def exitStart(self):
         pass
-
-    def enterStop(self):
-        DatabaseOperationFSM.enterStop(self)
-
-    def exitStop(self):
-        self._do_id = None
-        self._field_data = None
 
 class DatabaseServer(io.NetworkConnector, component.Component):
     notify = notify.new_category('DatabaseServer')
@@ -685,21 +674,75 @@ class DatabaseServer(io.NetworkConnector, component.Component):
             self.handle_object_get_all(sender, di)
         elif message_type == types.DBSERVER_OBJECT_SET_FIELD:
             self.handle_object_set_field(sender, di)
+        elif message_type == types.DBSERVER_OBJECT_SET_FIELD_IF_EQUALS:
+            self.handle_object_set_field_if_equals(sender, di)
         else:
             self.notify.warning('Received unknown message type: %d' % message_type)
 
     def handle_create_object(self, sender, di):
         self._operation_manager.add_operation(DatabaseCreateFSM, self, sender,
             context=di.get_uint32(), dc_id=di.get_uint16(), field_count=di.get_uint16(),
-            field_data=di.get_remaining_bytes())
+            field_data=di.get_remaining_bytes(), callback=self._create_object_callback)
+
+    def _create_object_callback(self, success, sender, context, do_id):
+        datagram = io.NetworkDatagram()
+        datagram.add_header(sender, self.channel,
+            types.DBSERVER_CREATE_OBJECT_RESP)
+
+        datagram.add_uint32(context)
+        datagram.add_uint32(do_id)
+
+        self.handle_send_connection_datagram(datagram)
 
     def handle_object_get_all(self, sender, di):
         self._operation_manager.add_operation(DatabaseRetrieveFSM, self, sender,
-            context=di.get_uint32(), do_id=di.get_uint32())
+            context=di.get_uint32(), do_id=di.get_uint32(), callback=self._object_get_all_callback)
+
+    def _object_get_all_callback(self, success, sender, context, dc_id, num_fields, field_packer):
+        datagram = io.NetworkDatagram()
+        datagram.add_header(sender, self.channel,
+            types.DBSERVER_OBJECT_GET_ALL_RESP)
+
+        datagram.add_uint32(context)
+        datagram.add_uint8(success)
+        if success:
+            datagram.add_uint16(dc_id)
+            datagram.add_uint16(num_fields)
+
+            assert(field_packer is not None)
+            datagram.append_data(field_packer.get_string())
+
+        self.handle_send_connection_datagram(datagram)
 
     def handle_object_set_field(self, sender, di):
         self._operation_manager.add_operation(DatabaseSetFieldFSM, self, sender,
             do_id=di.get_uint32(), field_data=di.get_remaining_bytes())
+
+    def handle_object_set_field_if_equals(self, sender, di):
+        self._operation_manager.add_operation(DatabaseSetFieldFSM, self, sender,
+            do_id=di.get_uint32(), field_data=di.get_remaining_bytes(), callback=self._object_set_field_if_equals_callback)
+
+    def _object_set_field_if_equals_callback(self, success, sender, context, field_id, field_data):
+        field_packer = DCPacker()
+        field = self._dc_class.get_field_by_index(field_id)
+        assert(field is not None)
+
+        field_packer.raw_pack_uint16(field_id)
+        field_packer.begin_pack(field)
+        field.pack_args(field_packer, field_data)
+        field_packer.end_pack()
+
+        datagram = io.NetworkDatagram()
+        datagram.add_header(sender, self.channel,
+            types.DBSERVER_OBJECT_SET_FIELD_IF_EQUALS_RESP)
+
+        datagram.add_uint32(context)
+        datagram.add_uint8(success)
+        if not success:
+            datagram.add_uint16(1)
+            datagram.append_data(field_packer.get_string())
+
+        self.handle_send_connection_datagram(datagram)
 
     def shutdown(self):
         self._backend.shutdown()

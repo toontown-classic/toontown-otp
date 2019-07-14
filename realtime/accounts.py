@@ -175,9 +175,9 @@ class LoadAccountFSM(ClientOperation):
             self.manager.network.dc_loader.dclasses_by_name['Account'])
 
     def __account_loaded(self, dclass, fields):
-        if not dclass and not fields:
-            self.notify.warning('Failed to load account: %d for channel: %d playtoken: %s!' % (
-                self._account_id, self._client.channel, self._play_token))
+        if not dclass:
+            self.notify.warning('Failed to load account: %d for channel: '
+                '%d playtoken: %s!' % (self._account_id, self._client.channel, self._play_token))
 
             self.cleanup(False)
             return
@@ -323,6 +323,10 @@ class RetrieveAvatarsFSM(ClientOperation):
         pass
 
     def __account_loaded(self, dclass, fields):
+        if not dclass:
+            self.cleanup(False)
+            return
+
         avatar_list = fields['ACCOUNT_AV_SET'][0]
         for avatar_id in avatar_list:
             if not avatar_id:
@@ -347,7 +351,6 @@ class RetrieveAvatarsFSM(ClientOperation):
 
     def enterSetAvatars(self):
         avatar_list = []
-
         for avatar_id, fields in self._avatar_fields.items():
             avatar_data = ClientAvatarData(avatar_id, [fields['setName'][0], '', '', ''], fields['setDNAString'][0],
                 fields['setPosIndex'][0], 0)
@@ -387,6 +390,13 @@ class CreateAvatarFSM(ClientOperation):
             callback=lambda avatar_id: self.__avatar_created(avatar_id, self._index))
 
     def __avatar_created(self, avatar_id, index):
+        if not avatar_id:
+            self.notify.warning('Failed to create avatar with index: '
+                '%d for account with do_id: %d!' % (index, self._account_id))
+
+            self.cleanup(False)
+            return
+
         self.manager.network.database_interface.query_object(self.client.channel,
             types.DATABASE_CHANNEL,
             self._account_id,
@@ -394,6 +404,10 @@ class CreateAvatarFSM(ClientOperation):
             self.manager.network.dc_loader.dclasses_by_name['Account'])
 
     def __account_loaded(self, dclass, fields, avatar_id, index):
+        if not dclass:
+            self.cleanup(False)
+            return
+
         avatar_list = fields['ACCOUNT_AV_SET'][0]
         avatar_list[index] = avatar_id
 
@@ -426,17 +440,18 @@ class LoadAvatarFSM(ClientOperation):
         self._fields = {}
 
     def enterStart(self):
+        if self._avatar_id == 0:
+            self.cleanup(False)
+            return
 
         def response(dclass, fields):
+            if not dclass:
+                self.cleanup(False)
+                return
+
             self._dc_class = dclass
             self._fields = fields
             self.request('Activate')
-
-        if self._avatar_id == 0:
-            self.notify.warning('%s was inproperly initialized! Cleaning up FSM' % (self.__class__.__name__))
-            self.callback = None
-            self.cleanup(False)
-            return
 
         self.manager.network.database_interface.query_object(self.client.channel,
             types.DATABASE_CHANNEL,
@@ -575,6 +590,10 @@ class LoadFriendsListFSM(ClientOperation):
     def enterStart(self):
 
         def response(dclass, fields):
+            if not dclass:
+                self.cleanup(False)
+                return
+
             self._dc_class = dclass
             self._fields = fields
             self.request('QueryFriends')
@@ -598,9 +617,12 @@ class LoadFriendsListFSM(ClientOperation):
         for friend_id, friend_type in friends_list:
 
             def queryFriendCallback(dclass, fields, avatar_id=friend_id):
+                if not dclass:
+                    self.cleanup(False)
+                    return
+
                 self._friends_list[avatar_id] = [dclass, fields]
                 del self._pending_friends[avatar_id]
-
                 if not self._pending_friends:
                     self.request('LoadFriends')
 
@@ -693,6 +715,10 @@ class SetNameFSM(ClientOperation):
 
         def response(dclass, fields):
             self.notify.debug("SetNameFSM.enterQuery.response(%s, %s)" % (str(dclass), str(fields)))
+            if not dclass:
+                self.cleanup(False)
+                return
+
             self._dc_class = dclass
             self._fields = fields
             self.request('SetName')
@@ -748,6 +774,10 @@ class SetNamePatternFSM(ClientOperation):
 
         def response(dclass, fields):
             self.notify.debug("SetNamePatternFSM.enterQuery.response(%s, %s)" % (str(dclass), str(fields)))
+            if not dclass:
+                self.cleanup(False)
+                return
+
             self._dc_class = dclass
             self._fields = fields
             self.request('SetPatternName')
@@ -815,6 +845,10 @@ class GetAvatarDetailsFSM(ClientOperation):
     def enterStart(self):
 
         def response(dclass, fields):
+            if not dclass:
+                self.cleanup(False)
+                return
+
             self._dc_class = dclass
             self._fields = fields
             self.request('SendDetails')
@@ -895,6 +929,10 @@ class DeleteAvatarFSM(ClientOperation):
         pass
 
     def __account_loaded(self, dclass, fields):
+        if not dclass:
+            self.cleanup(False)
+            return
+
         self.avatar_list = fields['ACCOUNT_AV_SET'][0]
         for avatar_id in self.avatar_list:
             if not avatar_id or avatar_id == self._avatar_id:
@@ -903,6 +941,10 @@ class DeleteAvatarFSM(ClientOperation):
             self._pending_avatars.append(avatar_id)
 
             def response(dclass, fields, avatar_id=avatar_id):
+                if not dclass:
+                    self.cleanup(False)
+                    return
+
                 self._avatar_fields[avatar_id] = fields
                 self._pending_avatars.remove(avatar_id)
                 if not self._pending_avatars:
@@ -967,7 +1009,8 @@ class ClientAccountManager(ClientOperationManager):
     def __init__(self, *args, **kwargs):
         ClientOperationManager.__init__(self, *args, **kwargs)
 
-        self._dbm = semidbm.open(config.GetString('clientagent-dbm-filename', 'databases/database.dbm'),
+        self._dbm = semidbm.open(
+            config.GetString('clientagent-dbm-filename', 'databases/database.dbm'),
             config.GetString('clientagent-dbm-mode', 'c'))
 
     @property
@@ -977,7 +1020,7 @@ class ClientAccountManager(ClientOperationManager):
     def handle_operation(self, operationFSM, client, callback, *args, **kwargs):
         operation = self.run_operation(operationFSM, client, callback, *args, **kwargs)
         if not operation:
-            self.notify.warning('Failed to handle unknown operation: %r!' % operationFSM)
+            self.notify.warning('Failed to handle operation: %r!' % operationFSM)
             return
 
         operation.request('Start')
