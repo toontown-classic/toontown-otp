@@ -586,17 +586,26 @@ class DatabaseSetFieldFSM(DatabaseOperationFSM):
 
     def __init__(self, *args, **kwargs):
         self._do_id = kwargs.pop('do_id', 0)
+        self._context = kwargs.pop('context', 0)
         self._field_data = kwargs.pop('field_data', None)
 
         DatabaseOperationFSM.__init__(self, *args, **kwargs)
 
     def enterStart(self):
+        field_packer = DCPacker()
+        field_packer.set_unpack_data(self._field_data)
+        field_id = field_packer.raw_unpack_uint16()
+        field = dc_class.get_field_by_index(field_id)
+        if not field:
+            self.notify.error('Failed to unpack field: %d dclass: %s, '
+                'invalid field!' % (field_id, dc_class.get_name()))
+
         file_object = self.network.backend.open_file('%d' % self._do_id)
         if not file_object:
             self.notify.warning('Failed to set fields for object: %d, '
                 'unknown object!' % self._do_id)
 
-            self.cleanup(False, 0, None)
+            self.cleanup(False, self._context, field_id, self._field_data)
             return
 
         dc_name = file_object.get_value('dclass')
@@ -605,7 +614,7 @@ class DatabaseSetFieldFSM(DatabaseOperationFSM):
             self.notify.warning('Failed to set fields for object: %d, '
                 'unknown dclass: %s!' % (self._do_id, dc_name))
 
-            self.cleanup(False, 0, None)
+            self.cleanup(False, self._context, field_id, self._field_data)
             return
 
         fields = file_object.get_value('fields')
@@ -613,16 +622,8 @@ class DatabaseSetFieldFSM(DatabaseOperationFSM):
             self.notify.warning('Failed to set fields for object: %d, '
                 'invalid fields!' % self._do_id)
 
-            self.cleanup(False, 0, None)
+            self.cleanup(False, self._context, field_id, self._field_data)
             return
-
-        field_packer = DCPacker()
-        field_packer.set_unpack_data(self._field_data)
-        field_id = field_packer.raw_unpack_uint16()
-        field = dc_class.get_field_by_index(field_id)
-        if not field:
-            self.notify.error('Failed to unpack field: %d dclass: %s, '
-                'invalid field!' % (field_id, dc_class.get_name()))
 
         field_packer.begin_unpack(field)
         field_args = field.unpack_args(field_packer)
@@ -635,7 +636,7 @@ class DatabaseSetFieldFSM(DatabaseOperationFSM):
         file_object.set_value('fields', fields)
 
         self.network.backend.close_file(file_object)
-        self.cleanup(True, field_id, self._field_data)
+        self.cleanup(True, 0, None)
 
     def exitStart(self):
         pass
@@ -720,18 +721,9 @@ class DatabaseServer(io.NetworkConnector, component.Component):
 
     def handle_object_set_field_if_equals(self, sender, di):
         self._operation_manager.add_operation(DatabaseSetFieldFSM, self, sender,
-            do_id=di.get_uint32(), field_data=di.get_remaining_bytes(), callback=self._object_set_field_if_equals_callback)
+            do_id=di.get_uint32(), context=di.get_uint32(), field_data=di.get_remaining_bytes(), callback=self._object_set_field_if_equals_callback)
 
     def _object_set_field_if_equals_callback(self, success, sender, context, field_id, field_data):
-        field_packer = DCPacker()
-        field = self._dc_class.get_field_by_index(field_id)
-        assert(field is not None)
-
-        field_packer.raw_pack_uint16(field_id)
-        field_packer.begin_pack(field)
-        field.pack_args(field_packer, field_data)
-        field_packer.end_pack()
-
         datagram = io.NetworkDatagram()
         datagram.add_header(sender, self.channel,
             types.DBSERVER_OBJECT_SET_FIELD_IF_EQUALS_RESP)
@@ -739,6 +731,15 @@ class DatabaseServer(io.NetworkConnector, component.Component):
         datagram.add_uint32(context)
         datagram.add_uint8(success)
         if not success:
+            field_packer = DCPacker()
+            field = self._dc_class.get_field_by_index(field_id)
+            assert(field is not None)
+
+            field_packer.raw_pack_uint16(field_id)
+            field_packer.begin_pack(field)
+            field.pack_args(field_packer, field_data)
+            field_packer.end_pack()
+
             datagram.add_uint16(1)
             datagram.append_data(field_packer.get_string())
 
