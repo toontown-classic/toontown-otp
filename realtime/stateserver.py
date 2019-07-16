@@ -851,13 +851,10 @@ class StateServer(io.NetworkConnector, component.Component):
 
     def handle_delete_shard_objects(self, shard):
         for state_object in list(self.object_manager.objects.values()):
-            if not state_object.owner_id:
-                continue
-
             if state_object.ai_channel != shard.channel:
                 continue
 
-            # if this object is owned and since this shard is closed,
+            # If this object is owned and since this shard is closed,
             # send a disconnect to the client agent to be bounced back to the client.
             if state_object.owner_id:
                 self.handle_send_disconnect(state_object.owner_id, shard)
