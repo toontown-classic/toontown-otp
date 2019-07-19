@@ -577,6 +577,10 @@ class Client(io.NetworkHandler):
             for zone_id in new_vis_zones.difference(old_vis_zones):
                 self._interest_manager.add_interest_zone(zone_id)
 
+            # make sure we can see quiet zone objects in streets
+            if not self._interest_manager.has_interest_zone(OTP_ZONE_ID_OLD_QUIET_ZONE):
+                self._interest_manager.add_interest_zone(OTP_ZONE_ID_OLD_QUIET_ZONE)
+
             updated_new_branch_zones = True
         else:
             self._interest_manager.add_interest_zone(new_zone_id)
