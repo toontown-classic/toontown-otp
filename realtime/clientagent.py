@@ -851,6 +851,10 @@ class Client(io.NetworkHandler):
         self.send_client_object_delete_resp(do_id)
 
     def shutdown(self):
+        if self.__interest_timeout_task:
+            taskMgr.remove(self.__interest_timeout_task)
+            self.__interest_timeout_task = None
+
         if self.network.account_manager.has_fsm(self.allocated_channel):
             self.network.account_manager.stop_operation(self)
 
