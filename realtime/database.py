@@ -420,7 +420,7 @@ class DatabaseOperationManager(object):
         Gets an database operation from the queue and processes it...
         """
 
-        if len(self._operations) > 0:
+        while len(self._operations) > 0:
             operation = self._operations.popleft()
             operation.request('Start')
 
