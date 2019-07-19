@@ -602,8 +602,10 @@ class Client(io.NetworkHandler):
                 self.remove_seen_object(do_id)
                 self.send_client_object_delete_resp(do_id)
 
-        self._generate_deferred_callback = util.DeferredCallback(self.handle_set_zone_complete_callback,
-            old_parent_id, old_zone_id, new_parent_id, new_zone_id)
+        # only run a deferred callback if we moved to or from a non street zone
+        if not updated_new_branch_zones or not updated_old_branch_zones:
+            self._generate_deferred_callback = util.DeferredCallback(self.handle_set_zone_complete_callback,
+                old_parent_id, old_zone_id, new_parent_id, new_zone_id)
 
         # request all of the objects in the zones we have interest in
         avatar_id = self.get_avatar_id_from_connection_channel(self.channel)
