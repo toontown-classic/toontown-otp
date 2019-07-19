@@ -91,7 +91,6 @@ class MessageInterface(object):
 
     def __init__(self, network):
         self._network = network
-        self._flush_timeout = config.GetFloat('messagedirector-flush-timeout', 0.001)
         self._messages = collections.deque()
         self._post_messages = {}
 
@@ -152,10 +151,6 @@ class MessageInterface(object):
 
         del self._post_messages[channel]
 
-    def setup(self):
-        self.__flush_task = task_mgr.doMethodLater(self._flush_timeout, self.__flush,
-            self._network.get_unique_name('flush-queue'))
-
     def route_datagram(self, message_handle, participant):
         assert(message_handle != None)
 
@@ -178,8 +173,8 @@ class MessageInterface(object):
         message_handle.destroy()
         del message_handle
 
-    def __flush(self, task):
-        for _ in xrange(len(self._messages)):
+    def flush_handles(self):
+        while len(self._messages) > 0:
             # pull a message handle object off the top of the queue,
             # then attempt to route it to its appropiate channel...
             message_handle = self._messages.popleft()
@@ -191,8 +186,6 @@ class MessageInterface(object):
                 continue
 
             self.route_datagram(message_handle, participant)
-
-        return task.again
 
     def flush_post_handles(self, channel):
         messages = self._post_messages.get(channel)
@@ -233,11 +226,6 @@ class MessageInterface(object):
         for channel in list(self._post_messages.keys()):
             self.flush_post_handles(channel)
 
-    def shutdown(self):
-        if self.__flush_task:
-            task_mgr.remove(self.__flush_task)
-            self.__flush_task = None
-
 class Participant(io.NetworkHandler):
     notify = notify.new_category('Participant')
 
@@ -268,14 +256,6 @@ class Participant(io.NetworkHandler):
     @property
     def message_interface(self):
         return self._message_interface
-
-    def setup(self):
-        self._message_interface.setup()
-        io.NetworkHandler.setup(self)
-
-    def shutdown(self):
-        self._message_interface.shutdown()
-        io.NetworkHandler.shutdown(self)
 
     def handle_datagram(self, di):
         channels = di.get_uint8()
@@ -357,17 +337,45 @@ class ParticipantInterface(object):
     def get_participant(self, channel):
         return self._participants.get(channel)
 
+    def setup(self):
+        self.__flush_task = task_mgr.doMethodLater(self._network.flush_timeout, self.__flush,
+            self._network.get_unique_name('flush-queue'))
+
+    def __flush(self, task):
+        for participant in list(self._participants.values()):
+            participant.message_interface.flush_handles()
+
+        return task.again
+
+    def shutdown(self):
+        if self.__flush_task:
+            task_mgr.remove(self.__flush_task)
+            self.__flush_task = None
+
 class MessageDirector(io.NetworkListener, component.Component):
     notify = notify.new_category('MessageDirector')
 
     def __init__(self):
         address = config.GetString('messagedirector-address', '0.0.0.0')
         port = config.GetInt('messagedirector-port', 7100)
+        self._flush_timeout = config.GetFloat('messagedirector-flush-timeout', 0.001)
 
         io.NetworkListener.__init__(self, address, port, Participant)
 
         self._interface = ParticipantInterface(self)
 
     @property
+    def flush_timeout(self):
+        return self._flush_timeout
+
+    @property
     def interface(self):
         return self._interface
+
+    def setup(self):
+        self._interface.setup()
+        io.NetworkListener.setup(self)
+
+    def shutdown(self):
+        self._interface.shutdown()
+        io.NetworkListener.shutdown(self)
