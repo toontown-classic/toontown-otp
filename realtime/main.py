@@ -42,6 +42,21 @@ __builtin__.task_mgr = task_mgr
 from realtime import io, component
 from realtime import messagedirector, clientagent, stateserver, database
 
+# attempt to import and utilize the C++ Message Director implementation
+try:
+    import libotp
+    class CMessageDirector(libotp.MessageDirector, component.Component):
+
+        def __init__(self):
+            address = config.GetString('messagedirector-address', '0.0.0.0')
+            port = config.GetInt('messagedirector-port', 7100)
+
+            libotp.MessageDirector.__init__(self, address, port)
+
+    has_clibotp = True
+except ImportError:
+    has_clibotp = False
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-nmd", "--no-messagedirector", help="Disables the MessageDirector cluster component.", action='store_true')
@@ -56,9 +71,11 @@ def main():
     dc_loader.read_dc_files(['config/dclass/toon.dc'])
 
     component_manager = component.ComponentManager()
-
     if not args.no_messagedirector:
-        component_manager.add_component(messagedirector.MessageDirector())
+        if has_clibotp:
+            component_manager.add_component(CMessageDirector())
+        else:
+            component_manager.add_component(messagedirector.MessageDirector())
 
     if not args.no_clientagent:
         component_manager.add_component(clientagent.ClientAgent(dc_loader))
