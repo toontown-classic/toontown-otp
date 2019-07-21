@@ -397,7 +397,10 @@ class StateObject(object):
             return
 
         self.ai_channel = new_ai_channel
-        if self._owner_id:
+
+        # here we are setting the object's parent manually, this is because
+        # the 2003 version of the Toontown client did not implement parent objects...
+        if self._owner_id and not self._parent_id:
             self.parent_id = shard.district_id
 
         self.handle_send_ai_entry(self._ai_channel)
