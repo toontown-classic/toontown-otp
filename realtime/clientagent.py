@@ -59,6 +59,10 @@ class InterestManager(object):
         if zone_id in self._interest_zones:
             return
 
+        # ensure we always have interest in the quiet zone
+        if OTP_ZONE_ID_OLD_QUIET_ZONE not in self._interest_zones:
+            self._interest_zones.add(OTP_ZONE_ID_OLD_QUIET_ZONE)
+
         self._interest_zones.add(zone_id)
 
     def remove_interest_zone(self, zone_id):
@@ -556,32 +560,26 @@ class Client(io.NetworkHandler):
             self._location_deferred_callback.destroy()
             self._location_deferred_callback = None
 
-        updated_old_branch_zones = False
-        updated_new_branch_zones = False
+        old_zone_in_street_branch = self.get_in_street_branch(old_zone_id)
+        new_zone_in_street_branch = self.get_in_street_branch(new_zone_id)
 
         old_vis_zones = set()
-        if self.get_in_street_branch(old_zone_id):
+        if old_zone_in_street_branch:
+            old_branch_zone_id = ZoneUtil.getBranchZone(old_zone_id)
             old_vis_zones.update(self.get_vis_branch_zones(old_zone_id))
-            for zone_id in old_vis_zones.difference(old_vis_zones):
+            for zone_id in self._interest_manager.interest_zones.difference(old_vis_zones):
                 self._interest_manager.remove_interest_zone(zone_id)
-
-            updated_old_branch_zones = True
         else:
             self._interest_manager.remove_interest_zone(old_zone_id)
             if old_zone_id != OTP_ZONE_ID_OLD_QUIET_ZONE:
                 self._interest_manager.remove_interest_zone(OTP_ZONE_ID_OLD_QUIET_ZONE)
 
         new_vis_zones = set()
-        if self.get_in_street_branch(new_zone_id):
+        if new_zone_in_street_branch:
+            new_branch_zone_id = ZoneUtil.getBranchZone(old_zone_id)
             new_vis_zones.update(self.get_vis_branch_zones(new_zone_id))
             for zone_id in new_vis_zones.difference(old_vis_zones):
                 self._interest_manager.add_interest_zone(zone_id)
-
-            # make sure we can see quiet zone objects in streets
-            if not self._interest_manager.has_interest_zone(OTP_ZONE_ID_OLD_QUIET_ZONE):
-                self._interest_manager.add_interest_zone(OTP_ZONE_ID_OLD_QUIET_ZONE)
-
-            updated_new_branch_zones = True
         else:
             self._interest_manager.add_interest_zone(new_zone_id)
             if new_zone_id != OTP_ZONE_ID_OLD_QUIET_ZONE:
@@ -589,9 +587,17 @@ class Client(io.NetworkHandler):
 
         # clear the dna store for this branch zones since
         # they have left the street branch
-        if updated_old_branch_zones and not updated_new_branch_zones:
+        if (old_zone_in_street_branch and not new_zone_in_street_branch) or\
+            (old_zone_in_street_branch and new_zone_in_street_branch and old_branch_zone_id != new_branch_zone_id):
+
+            # remove the branch dna zone store
             branch_zone_id = ZoneUtil.getBranchZone(old_zone_id)
             del self._dna_stores[branch_zone_id]
+
+            # remove the old street zones
+            old_vis_zones = self.get_vis_branch_zones(old_zone_id)
+            for zone_id in old_vis_zones:
+                self._interest_manager.remove_interest_zone(zone_id)
 
         # destroy the objects we no longer have interest in
         for zone_id in dict(self._seen_objects):
@@ -607,7 +613,7 @@ class Client(io.NetworkHandler):
                 self.send_client_object_delete_resp(do_id)
 
         # only run a deferred callback if we moved to or from a non street zone
-        if not updated_new_branch_zones or not updated_old_branch_zones:
+        if not old_zone_in_street_branch or not new_zone_in_street_branch:
             self._generate_deferred_callback = util.DeferredCallback(self.handle_set_zone_complete_callback,
                 old_parent_id, old_zone_id, new_parent_id, new_zone_id)
 
