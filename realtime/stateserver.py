@@ -762,19 +762,22 @@ class StateObjectManager(object):
     def handle_updating_field(self, state_object, sender, field, field_args, excludes=[]):
         assert(state_object != None)
         if not state_object.parent_id:
-            self.notify.debug('Cannot handle updating field for object: %d, '
+            self.notify.warning('Cannot handle updating field for object: %d, '
                 'object has no parent!' % state_object.do_id)
 
             return
 
         parent_object = self.get_object(state_object.parent_id)
         if not parent_object:
-            self.notify.debug('Cannot handle updating field for object: %d, '
+            self.notify.warning('Cannot handle updating field for object: %d, '
                 'object has no parent!' % state_object.do_id)
 
             return
 
         if not parent_object.has_child(state_object.do_id):
+            self.notify.warning('Cannot handle updating field for object: %d, '
+                'we: %d are not this objects parent!' % (state_object.do_id, self._do_id))
+
             return
 
         child_zone_id = parent_object.get_zone_from_child(state_object.do_id)
