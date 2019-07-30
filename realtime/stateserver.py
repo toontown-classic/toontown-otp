@@ -704,6 +704,8 @@ class StateObject(object):
                     self.handle_send_save_field(field, field_args)
 
     def destroy(self):
+        self._network.unregister_for_channel(self._do_id)
+
         self.parent_id = 0
         self.zone_id = 0
         self.owner_id = 0
