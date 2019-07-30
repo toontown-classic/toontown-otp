@@ -248,6 +248,10 @@ class StateObject(object):
         for zone_id in list(self._zone_objects):
             zone_objects.extend(self.get_zone_objects(zone_id))
 
+        # also get all of our children's zone objects
+        for zone_object in list(zone_objects):
+            zone_objects.extend(zone_object.get_all_zone_objects())
+
         return zone_objects
 
     def get_zones_objects(self, zone_ids):
