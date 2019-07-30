@@ -845,7 +845,10 @@ class StateServer(io.NetworkConnector, component.Component):
 
     def handle_add_shard(self, ai_channel, di):
         shard = self.shard_manager.add_shard(ai_channel, di.get_uint32(), di.get_string(), di.get_uint32())
-        self.handle_send_update_shard_info()
+
+        # tell everyone that this shard is up and then update the shard info
+        self.handle_broadcast_server_up(shard)
+        self.handle_broadcast_shard_info()
 
         # setup a post remove to remove the shard when the AI disconnects
         post_remove = io.NetworkDatagram()
@@ -868,8 +871,8 @@ class StateServer(io.NetworkConnector, component.Component):
         shard.name = di.get_string()
         shard.population = di.get_uint32()
 
-        # broadcast the shard info change to everyone
-        self.handle_send_update_shard_info()
+        # tell everyone about the shard's new info
+        self.handle_broadcast_shard_info()
 
     def handle_remove_shard(self, ai_channel):
         shard = self.shard_manager.get_shard(ai_channel)
@@ -887,12 +890,8 @@ class StateServer(io.NetworkConnector, component.Component):
         self.object_manager.remove_object(shard_object)
         self.shard_manager.remove_shard(shard)
 
-        # update everyone's shard list
-        self.handle_send_update_shard_info()
-
-    def handle_send_update_shard_info(self):
-        for state_object in itertools.ifilter(lambda x: x.owner_id > 0, list(self.object_manager.objects.values())):
-            self.handle_send_shard_list(state_object.owner_id)
+        # tell everyone that this shard has been closed
+        self.handle_broadcast_server_down(shard)
 
     def handle_send_shard_list(self, channel):
         datagram = io.NetworkDatagram()
@@ -906,6 +905,37 @@ class StateServer(io.NetworkConnector, component.Component):
             datagram.add_uint32(shard.population)
 
         self.handle_send_connection_datagram(datagram)
+
+    def handle_send_server_up(self, channel, shard):
+        assert(shard is not None)
+        datagram = io.NetworkDatagram()
+        datagram.add_header(channel, self.channel,
+            types.STATESERVER_SERVER_UP)
+
+        datagram.add_uint32(shard.channel)
+        datagram.add_string(shard.name)
+        self.handle_send_connection_datagram(datagram)
+
+    def handle_send_server_down(self, channel, shard):
+        assert(shard is not None)
+        datagram = io.NetworkDatagram()
+        datagram.add_header(channel, self.channel,
+            types.STATESERVER_SERVER_DOWN)
+
+        datagram.add_uint32(shard.channel)
+        self.handle_send_connection_datagram(datagram)
+
+    def handle_broadcast_server_up(self, shard):
+        for state_object in itertools.ifilter(lambda x: x.owner_id > 0, list(self.object_manager.objects.values())):
+            self.handle_send_server_up(state_object.owner_id, shard)
+
+    def handle_broadcast_server_down(self, shard):
+        for state_object in itertools.ifilter(lambda x: x.owner_id > 0, list(self.object_manager.objects.values())):
+            self.handle_send_server_down(state_object.owner_id, shard)
+
+    def handle_broadcast_shard_info(self):
+        for state_object in itertools.ifilter(lambda x: x.owner_id > 0, list(self.object_manager.objects.values())):
+            self.handle_send_shard_list(state_object.owner_id)
 
     def handle_generate(self, sender, has_other, di):
         do_id = di.get_uint32()

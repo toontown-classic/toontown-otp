@@ -201,6 +201,10 @@ class Client(io.NetworkHandler):
             self.handle_friend_offline(di)
         elif message_type == types.STATESERVER_GET_SHARD_ALL_RESP:
             self.handle_get_shard_list_resp(di)
+        elif message_type == types.STATESERVER_SERVER_UP:
+            self.handle_server_up(di)
+        elif message_type == types.STATESERVER_SERVER_DOWN:
+            self.handle_server_down(di)
         elif message_type == types.STATESERVER_OBJECT_LOCATION_ACK:
             self.handle_object_location_ack(di)
         elif message_type == types.STATESERVER_OBJECT_GET_ZONES_OBJECTS_RESP:
@@ -276,6 +280,24 @@ class Client(io.NetworkHandler):
         datagram = io.NetworkDatagram()
         datagram.add_uint16(types.CLIENT_GET_SHARD_LIST_RESP)
         datagram.append_data(di.get_remaining_bytes())
+        self.handle_send_datagram(datagram)
+
+    def handle_server_up(self, di):
+        shard_id = di.get_uint32()
+        shard_name = di.get_string()
+
+        datagram = io.NetworkDatagram()
+        datagram.add_uint16(types.CLIENT_SERVER_UP)
+        datagram.add_uint32(shard_id)
+        datagram.add_string(shard_name)
+        self.handle_send_datagram(datagram)
+
+    def handle_server_down(self, di):
+        shard_id = di.get_uint32()
+
+        datagram = io.NetworkDatagram()
+        datagram.add_uint16(types.CLIENT_SERVER_DOWN)
+        datagram.add_uint32(shard_id)
         self.handle_send_datagram(datagram)
 
     def handle_get_avatars(self):
