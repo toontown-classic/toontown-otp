@@ -126,9 +126,6 @@ class Client(io.NetworkHandler):
 
         return -1
 
-    def startup(self):
-        io.NetworkHandler.startup(self)
-
     def handle_send_disconnect(self, code, reason):
         datagram = io.NetworkDatagram()
         datagram.add_uint16(types.CLIENT_GO_GET_LOST)
