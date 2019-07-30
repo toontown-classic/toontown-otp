@@ -242,12 +242,12 @@ class Participant(io.NetworkHandler):
     notify = notify.new_category('Participant')
 
     def register_for_channel(self, channel):
-        io.NetworkHandler.register_for_channel(self, channel)
+        io.NetworkChannelManager.register_for_channel(self, channel)
         self.network.interface.add_participant(channel, self)
 
     def unregister_for_channel(self, channel):
         self.network.interface.remove_participant(channel)
-        io.NetworkHandler.unregister_for_channel(self, channel)
+        io.NetworkChannelManager.unregister_for_channel(self, channel)
 
     def handle_datagram(self, di):
         channels = di.get_uint8()
