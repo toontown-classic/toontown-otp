@@ -100,7 +100,7 @@ ENV/
 # mypy
 .mypy_cache/
 
-# mac os
+# Mac OS
 *.DS_Store
 
 # database
@@ -109,3 +109,6 @@ ENV/
 *.yml
 *.toml
 databases/
+
+# Other
+resources/
