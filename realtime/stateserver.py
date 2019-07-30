@@ -776,7 +776,7 @@ class StateObjectManager(object):
 
         if not parent_object.has_child(state_object.do_id):
             self.notify.warning('Cannot handle updating field for object: %d, '
-                'we: %d are not this objects parent!' % (state_object.do_id, self._do_id))
+                'we: %d are not this objects parent!' % (state_object.do_id, parent_object.do_id))
 
             return
 
