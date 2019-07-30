@@ -104,6 +104,7 @@ class StateObject(object):
         field_packer = DCPacker()
         field_packer.set_unpack_data(di.get_remaining_bytes())
 
+        # unpack all of the initial "required" fields
         for field_index in xrange(self._dc_class.get_num_inherited_fields()):
             field = self._dc_class.get_inherited_field(field_index)
             if not field:
@@ -119,6 +120,7 @@ class StateObject(object):
 
             self._required_fields[field.get_number()] = field_args
 
+        # unpack all of the initial "other" fields, if they are specified
         if self._has_other:
             num_fields = field_packer.raw_unpack_uint16()
             for _ in xrange(num_fields):
@@ -203,6 +205,10 @@ class StateObject(object):
     def has_other(self):
         return self._has_other
 
+    def __repr__(self):
+        return '%s(%d): ai_channel: %d, owner_id: %d, parent_id: %d, zone_id: %d' % (self._dc_class.get_name(),
+            self._do_id, self._ai_channel, self._owner_id, self._parent_id, self._zone_id)
+
     def has_child(self, child_do_id):
         return self.get_zone_from_child(child_do_id) is not None
 
@@ -243,14 +249,15 @@ class StateObject(object):
 
         return zone_objects
 
-    def get_all_zone_objects(self):
+    def get_all_zone_objects(self, recurse_children=True):
         zone_objects = []
         for zone_id in list(self._zone_objects):
             zone_objects.extend(self.get_zone_objects(zone_id))
 
         # also get all of our children's zone objects
-        for zone_object in list(zone_objects):
-            zone_objects.extend(zone_object.get_all_zone_objects())
+        if recurse_children:
+            for zone_object in list(zone_objects):
+                zone_objects.extend(zone_object.get_all_zone_objects())
 
         return zone_objects
 
@@ -401,10 +408,7 @@ class StateObject(object):
             return
 
         self.ai_channel = new_ai_channel
-
-        # here we are setting the object's parent manually, this is because
-        # the 2003 version of the Toontown client did not implement parent objects...
-        if self._owner_id and not self._parent_id:
+        if self._owner_id:
             self.parent_id = shard.district_id
 
         self.handle_send_ai_entry(self._ai_channel)
@@ -704,16 +708,21 @@ class StateObject(object):
                     self.handle_send_save_field(field, field_args)
 
     def destroy(self):
-        self._network.unregister_for_channel(self._do_id)
-
         self.parent_id = 0
         self.zone_id = 0
-        self.owner_id = 0
 
         self.handle_send_departure(self._ai_channel)
         old_parent = self.object_manager.get_object(self._old_parent_id)
         if old_parent is not None:
             old_parent.handle_changing_location(self._do_id, self._parent_id, self._zone_id)
+
+        # kill our object on the ClientAgent if we are a client owned object
+        if self._owner_id:
+            self.handle_send_changing_location(self._owner_id)
+
+        self._network.unregister_for_channel(self._do_id)
+
+        self.owner_id = 0
 
         self._required_fields = {}
         self._other_fields = {}
@@ -740,6 +749,12 @@ class StateObjectManager(object):
     def remove_object(self, state_object):
         if not self.has_object(state_object.do_id):
             return
+
+        # kill off all of our child objects, in this case we do not want
+        # to recurse our children's zone objects because this will be done
+        # automatically here when we call `remove_object`...
+        for child_object in state_object.get_all_zone_objects(recurse_children=False):
+            self.remove_object(child_object)
 
         state_object.destroy()
         del self.objects[state_object.do_id]
@@ -775,7 +790,7 @@ class StateObjectManager(object):
             return
 
         if not parent_object.has_child(state_object.do_id):
-            self.notify.warning('Cannot handle updating field for object: %d, '
+            self.notify.debug('Cannot handle updating field for object: %d, '
                 'we: %d are not this objects parent!' % (state_object.do_id, parent_object.do_id))
 
             return
@@ -806,7 +821,7 @@ class StateServer(io.NetworkConnector, component.Component):
         elif message_type == types.STATESERVER_REMOVE_SHARD:
             self.handle_remove_shard(sender)
         elif message_type == types.STATESERVER_GET_SHARD_ALL:
-            self.handle_get_shard_list(sender)
+            self.handle_send_shard_list(sender)
         elif message_type == types.STATESERVER_OBJECT_GENERATE_WITH_REQUIRED:
             self.handle_generate(sender, False, di)
         elif message_type == types.STATESERVER_OBJECT_GENERATE_WITH_REQUIRED_OTHER:
@@ -828,66 +843,60 @@ class StateServer(io.NetworkConnector, component.Component):
 
         state_object.handle_internal_datagram(sender, message_type, di)
 
-    def handle_add_shard(self, sender, di):
-        shard = self.shard_manager.add_shard(sender, di.get_uint32(), di.get_string(), di.get_uint32())
-        self.handle_send_update_shard(shard)
+    def handle_add_shard(self, ai_channel, di):
+        shard = self.shard_manager.add_shard(ai_channel, di.get_uint32(), di.get_string(), di.get_uint32())
+        self.handle_send_update_shard_info()
 
-    def handle_update_shard(self, sender, di):
-        shard = self.shard_manager.get_shard(sender)
+        # setup a post remove to remove the shard when the AI disconnects
+        post_remove = io.NetworkDatagram()
+        post_remove.add_header(self._channel, shard.channel,
+            types.STATESERVER_REMOVE_SHARD)
+
+        datagram = io.NetworkDatagram()
+        datagram.add_control_header(shard.channel,
+            types.CONTROL_ADD_POST_REMOVE)
+
+        datagram.append_data(post_remove.get_message())
+        self.handle_send_connection_datagram(datagram)
+
+    def handle_update_shard(self, ai_channel, di):
+        shard = self.shard_manager.get_shard(ai_channel)
         if not shard:
-            self.notify.warning('Cannot update shard: %d, does not exist!' % sender)
+            self.notify.warning('Cannot update shard: %d, shard does not exist!' % ai_channel)
             return
 
         shard.name = di.get_string()
         shard.population = di.get_uint32()
 
-        self.handle_send_update_shard(shard, only_children=True)
+        # broadcast the shard info change to everyone
+        self.handle_send_update_shard_info()
 
-    def handle_remove_shard(self, sender):
-        shard = self.shard_manager.get_shard(sender)
+    def handle_remove_shard(self, ai_channel):
+        shard = self.shard_manager.get_shard(ai_channel)
         if not shard:
-            self.notify.warning('Cannot remove shard: %d, does not exist!' % sender)
+            self.notify.debug('Cannot remove shard: %d, shard does not exist!' % ai_channel)
             return
 
-        self.handle_delete_shard_objects(shard)
+        shard_object = self.object_manager.get_object(shard.district_id)
+        if not shard_object:
+            self.notify.warning('Failed to delete all shard objects for shard: '
+                '%d with unknown district object: %d!' % (shard.channel, shard.district_id))
 
-    def handle_send_update_shard(self, shard, only_children=False):
-        for state_object in list(self.object_manager.objects.values()):
-            if not state_object.owner_id:
-                continue
+            return
 
-            if state_object.ai_channel != shard.channel and only_children:
-                continue
-
-            self.handle_get_shard_list(state_object.owner_id)
-
-    def handle_delete_shard_objects(self, shard):
-        for state_object in list(self.object_manager.objects.values()):
-            if state_object.ai_channel != shard.channel:
-                continue
-
-            # If this object is owned and since this shard is closed,
-            # send a disconnect to the client agent to be bounced back to the client.
-            if state_object.owner_id:
-                self.handle_send_disconnect(state_object.owner_id, shard)
-
-            self.object_manager.remove_object(state_object)
-
-        self.handle_send_update_shard(shard)
+        self.object_manager.remove_object(shard_object)
         self.shard_manager.remove_shard(shard)
 
-    def handle_send_disconnect(self, channel, shard):
+        # update everyone's shard list
+        self.handle_send_update_shard_info()
+
+    def handle_send_update_shard_info(self):
+        for state_object in itertools.ifilter(lambda x: x.owner_id > 0, list(self.object_manager.objects.values())):
+            self.handle_send_shard_list(state_object.owner_id)
+
+    def handle_send_shard_list(self, channel):
         datagram = io.NetworkDatagram()
         datagram.add_header(channel, self.channel,
-            types.CLIENTAGENT_DISCONNECT)
-
-        datagram.add_uint16(types.CLIENT_DISCONNECT_SHARD_CLOSED)
-        datagram.add_string('Shard with channel: %d has been terminated!' % shard.channel)
-        self.handle_send_connection_datagram(datagram)
-
-    def handle_get_shard_list(self, sender):
-        datagram = io.NetworkDatagram()
-        datagram.add_header(sender, self.channel,
             types.STATESERVER_GET_SHARD_ALL_RESP)
 
         datagram.add_uint16(len(self.shard_manager.shards))

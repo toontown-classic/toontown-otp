@@ -241,41 +241,13 @@ class MessageInterface(object):
 class Participant(io.NetworkHandler):
     notify = notify.new_category('Participant')
 
-    def __init__(self, *args, **kwargs):
-        io.NetworkHandler.__init__(self, *args, **kwargs)
+    def register_for_channel(self, channel):
+        io.NetworkHandler.register_for_channel(self, channel)
+        self.network.interface.add_participant(channel, self)
 
-        self._lo_channel = 0
-        self._hi_channel = 0
-
-        self._message_interface = MessageInterface(self._network)
-
-    @property
-    def lo_channel(self):
-        return self._lo_channel
-
-    @lo_channel.setter
-    def lo_channel(self, lo_channel):
-        self._lo_channel = lo_channel
-
-    @property
-    def hi_channel(self):
-        return self._hi_channel
-
-    @hi_channel.setter
-    def hi_channel(self, hi_channel):
-        self._hi_channel = hi_channel
-
-    @property
-    def message_interface(self):
-        return self._message_interface
-
-    def setup(self):
-        self._message_interface.setup()
-        io.NetworkHandler.setup(self)
-
-    def shutdown(self):
-        self._message_interface.shutdown()
-        io.NetworkHandler.shutdown(self)
+    def unregister_for_channel(self, channel):
+        self.network.interface.remove_participant(channel)
+        io.NetworkHandler.unregister_for_channel(self, channel)
 
     def handle_datagram(self, di):
         channels = di.get_uint8()
@@ -283,15 +255,10 @@ class Participant(io.NetworkHandler):
         if channels == 1 and channel == types.CONTROL_MESSAGE:
             message_type = di.get_uint16()
             sender = di.get_uint64()
-
             if message_type == types.CONTROL_SET_CHANNEL:
-                if not self.channel:
-                    self.channel = sender
-
-                self.network.interface.add_participant(sender, self)
+                self.register_for_channel(sender)
             elif message_type == types.CONTROL_REMOVE_CHANNEL:
-                self._message_interface.flush_post_handles(sender)
-                self.network.interface.remove_participant(sender)
+                self.unregister_for_channel(sender)
             elif message_type == types.CONTROL_SET_CON_NAME:
                 pass
             elif message_type == types.CONTROL_SET_CON_URL:
@@ -301,21 +268,16 @@ class Participant(io.NetworkHandler):
             elif message_type == types.CONTROL_REMOVE_RANGE:
                 pass
             elif message_type == types.CONTROL_ADD_POST_REMOVE:
-                self._message_interface.append_post_handle(sender, io.NetworkDatagram(
+                self.network.message_interface.append_post_handle(sender, io.NetworkDatagram(
                     Datagram(di.get_remaining_bytes())))
             elif message_type == types.CONTROL_CLEAR_POST_REMOVE:
-                self._message_interface.clear_post_handles(sender)
+                self.network.message_interface.clear_post_handles(sender)
             else:
                 self.notify.warning('Failed to handle unknown datagram with '
                     'message type: %d!' % message_type)
         else:
-            self._message_interface.append_handle(channel, di.get_uint64(), di.get_uint16(),
+            self.network.message_interface.append_handle(channel, di.get_uint64(), di.get_uint16(),
                 io.NetworkDatagram(Datagram(di.get_remaining_bytes())))
-
-    def handle_disconnected(self):
-        self._message_interface.flush_all_post_handles()
-        self.network.interface.remove_participant(self.channel)
-        io.NetworkHandler.handle_disconnected(self)
 
 class ParticipantInterface(object):
     notify = notify.new_category('ParticipantInterface')
@@ -347,6 +309,7 @@ class ParticipantInterface(object):
 
             return
 
+        self._network.message_interface.flush_post_handles(channel)
         del self._participants[channel]
 
     def get_participant(self, channel):
@@ -362,7 +325,20 @@ class MessageDirector(io.NetworkListener, component.Component):
         io.NetworkListener.__init__(self, address, port, Participant)
 
         self._interface = ParticipantInterface(self)
+        self._message_interface = MessageInterface(self)
 
     @property
     def interface(self):
         return self._interface
+
+    @property
+    def message_interface(self):
+        return self._message_interface
+
+    def setup(self):
+        io.NetworkListener.setup(self)
+        self._message_interface.setup()
+
+    def shutdown(self):
+        self._message_interface.shutdown()
+        io.NetworkListener.shutdown(self)

@@ -196,6 +196,9 @@ class NetworkChannelManager(object):
     def allocated_channel(self, allocated_channel):
         self._allocated_channel = allocated_channel
 
+    def has_channel(self, channel):
+        return channel in self._opened_channels
+
     def add_channel(self, channel):
         if channel in self._opened_channels:
             return

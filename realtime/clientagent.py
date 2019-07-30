@@ -815,10 +815,13 @@ class Client(io.NetworkHandler):
         new_parent_id = di.get_uint32()
         new_zone_id = di.get_uint32()
 
-        if not self.has_seen_object(do_id):
+        # check to see if our owned object is being deleted, in this case
+        # the shard our object is on, has been shutdown...
+        if do_id in self._owned_objects and new_parent_id == 0 and new_zone_id == 0:
+            self.handle_send_disconnect(types.CLIENT_DISCONNECT_SHARD_CLOSED, 'The shard you were playing on has been unexpectedly closed!')
             return
 
-        if do_id in self._owned_objects:
+        if not self.has_seen_object(do_id):
             return
 
         if self._interest_manager.has_interest_zone(new_zone_id):
@@ -846,9 +849,6 @@ class Client(io.NetworkHandler):
     def handle_object_delete_ram(self, di):
         do_id = di.get_uint32()
         if not self.has_seen_object(do_id):
-            return
-
-        if do_id in self._owned_objects:
             return
 
         self.send_client_object_delete_resp(do_id)
