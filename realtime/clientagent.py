@@ -871,10 +871,10 @@ class ClientAgent(io.NetworkConnector, io.NetworkListener, component.Component):
         port = config.GetInt('clientagent-port', 6667)
         connect_address = config.GetString('clientagent-connect-address', '127.0.0.1')
         connect_port = config.GetInt('clientagent-connect-port', 7100)
-        channel = config.GetInt('clientagent-channel', types.CLIENTAGENT_CHANNEL)
 
-        io.NetworkConnector.__init__(self, dc_loader, connect_address, connect_port, channel)
+        io.NetworkConnector.__init__(self, dc_loader, connect_address, connect_port)
         io.NetworkListener.__init__(self, address, port, Client)
+        self._channel = config.GetInt('clientagent-channel', types.CLIENTAGENT_CHANNEL)
 
         min_channels = config.GetInt('clientagent-min-channels', 1000000000)
         max_channels = config.GetInt('clientagent-max-channels', 1009999999)

@@ -791,9 +791,9 @@ class StateServer(io.NetworkConnector, component.Component):
     def __init__(self, dc_loader):
         connect_address = config.GetString('stateserver-connect-address', '127.0.0.1')
         connect_port = config.GetInt('stateserver-connect-port', 7100)
-        channel = config.GetInt('stateserver-channel', types.STATESERVER_CHANNEL)
 
-        io.NetworkConnector.__init__(self, dc_loader, connect_address, connect_port, channel)
+        io.NetworkConnector.__init__(self, dc_loader, connect_address, connect_port)
+        self._channel = config.GetInt('stateserver-channel', types.STATESERVER_CHANNEL)
 
         self.shard_manager = ShardManager()
         self.object_manager = StateObjectManager()

@@ -233,16 +233,6 @@ class LoadAccountFSM(ClientOperation):
         channel = self.client.get_account_connection_channel(self._account_id)
         self.client.register_for_channel(channel)
 
-        post_remove = io.NetworkDatagram()
-        post_remove.add_control_header(channel, types.CONTROL_REMOVE_CHANNEL)
-
-        datagram = io.NetworkDatagram()
-        datagram.add_control_header(self.client.allocated_channel,
-            types.CONTROL_ADD_POST_REMOVE)
-
-        datagram.append_data(post_remove.get_message())
-        self.manager.network.handle_send_connection_datagram(datagram)
-
         # add them to the account channel
         channel = self._account_id << 32
         self.client.handle_set_channel_id(channel)
@@ -494,16 +484,6 @@ class LoadAvatarFSM(ClientOperation):
         # add them to the avatar channel
         channel = self.client.get_puppet_connection_channel(self._avatar_id)
         self.client.register_for_channel(channel)
-
-        post_remove = io.NetworkDatagram()
-        post_remove.add_control_header(channel, types.CONTROL_REMOVE_CHANNEL)
-
-        datagram = io.NetworkDatagram()
-        datagram.add_control_header(self.client.allocated_channel,
-            types.CONTROL_ADD_POST_REMOVE)
-
-        datagram.append_data(post_remove.get_message())
-        self.manager.network.handle_send_connection_datagram(datagram)
 
         # set their sender channel to represent their account affiliation
         channel = self._account_id << 32 | self._avatar_id

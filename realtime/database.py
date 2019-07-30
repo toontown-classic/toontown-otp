@@ -647,9 +647,9 @@ class DatabaseServer(io.NetworkConnector, component.Component):
     def __init__(self, dc_loader):
         connect_address = config.GetString('database-connect-address', '127.0.0.1')
         connect_port = config.GetInt('database-connect-port', 7100)
-        channel = config.GetInt('database-channel', types.DATABASE_CHANNEL)
 
-        io.NetworkConnector.__init__(self, dc_loader, connect_address, connect_port, channel)
+        io.NetworkConnector.__init__(self, dc_loader, connect_address, connect_port)
+        self._channel = config.GetInt('database-channel', types.DATABASE_CHANNEL)
 
         self._backend = DatabaseJSONBackend()
         self._operation_manager = DatabaseOperationManager()

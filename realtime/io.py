@@ -166,16 +166,85 @@ class NetworkManager(object):
     def get_avatar_id_from_connection_channel(self, channel):
         return channel & 0xffffffff
 
-class NetworkConnector(NetworkManager):
+class NetworkChannelManager(object):
+
+    def __init__(self):
+        self._opened_channels = set()
+        self._channel = 0
+        self._allocated_channel = 0
+
+    @property
+    def opened_channels(self):
+        return self._opened_channels
+
+    @property
+    def channel(self):
+        return self._channel
+
+    @channel.setter
+    def channel(self, channel):
+        if not self._channel:
+            self._allocated_channel = channel
+
+        self._channel = channel
+
+    @property
+    def allocated_channel(self):
+        return self._allocated_channel
+
+    @allocated_channel.setter
+    def allocated_channel(self, allocated_channel):
+        self._allocated_channel = allocated_channel
+
+    def add_channel(self, channel):
+        if channel in self._opened_channels:
+            return
+
+        self._opened_channels.add(channel)
+
+    def remove_channel(self, channel):
+        if channel not in self._opened_channels:
+            return
+
+        self._opened_channels.remove(channel)
+
+    def register_for_channel(self, channel):
+        self.add_channel(channel)
+
+    def unregister_for_channel(self, channel):
+        self.remove_channel(channel)
+
+    def handle_set_channel_id(self, channel):
+        if channel == self._channel:
+            return
+
+        self.register_for_channel(channel)
+        if self._channel and self._channel != self._allocated_channel:
+            self.unregister_for_channel(self._channel)
+
+        self.channel = channel
+
+    def setup(self):
+        if self._channel:
+            self.register_for_channel(self._channel)
+
+    def shutdown(self):
+        for channel in list(self.opened_channels):
+            self.unregister_for_channel(channel)
+
+        self._channel = 0
+        self._allocated_channel = 0
+
+class NetworkConnector(NetworkChannelManager, NetworkManager):
     notify = notify.new_category('NetworkConnector')
 
-    def __init__(self, dc_loader, address, port, channel, timeout=5000):
+    def __init__(self, dc_loader, address, port, timeout=5000):
+        NetworkChannelManager.__init__(self)
         NetworkManager.__init__(self)
 
         self._dc_loader = dc_loader
         self.__address = address
         self.__port = port
-        self._channel = channel
         self.__timeout = timeout
 
         num_threads = 0
@@ -187,47 +256,34 @@ class NetworkConnector(NetworkManager):
         self.__writer = ConnectionWriter(self.__manager, num_threads)
 
         self.__socket = None
-        self._readable = collections.deque()
 
         self.__read_task = None
-        self.__update_task = None
         self.__disconnect_task = None
 
     @property
     def dc_loader(self):
         return self._dc_loader
 
-    @property
-    def channel(self):
-        return self._channel
-
-    @channel.setter
-    def channel(self, channel):
-        self._channel = channel
-
     def setup(self):
-        self.__socket = self.__manager.open_TCP_client_connection(self.__address,
-            self.__port, self.__timeout)
-
+        self.__socket = self.__manager.open_TCP_client_connection(self.__address, self.__port, self.__timeout)
         if not self.__socket:
             raise NetworkError('Failed to connect TCP socket on address: %s:%d' % (self.__address, self.__port))
 
         self.__reader.add_connection(self.__socket)
-        self.register_for_channel(self._channel)
-
         self.__read_task = task_mgr.add(self.__read_incoming,
             self.get_unique_name('read-incoming'))
 
-        self.__update_task = task_mgr.add(self.__update,
-            self.get_unique_name('update-handler'))
-
         self.__disconnect_task = task_mgr.add(self.__listen_disconnect,
             self.get_unique_name('listen-disconnect'))
+
+        NetworkChannelManager.setup(self)
 
     def register_for_channel(self, channel):
         """
         Registers our connections channel with the MessageDirector
         """
+
+        NetworkChannelManager.register_for_channel(self, channel)
 
         datagram = NetworkDatagram()
         datagram.add_control_header(channel, types.CONTROL_SET_CHANNEL)
@@ -237,6 +293,8 @@ class NetworkConnector(NetworkManager):
         """
         Unregisters our connections channel from the MessageDirector
         """
+
+        NetworkChannelManager.unregister_for_channel(self, channel)
 
         datagram = NetworkDatagram()
         datagram.add_control_header(channel, types.CONTROL_REMOVE_CHANNEL)
@@ -253,22 +311,6 @@ class NetworkConnector(NetworkManager):
             if self.__reader.get_data(datagram):
                 self.__handle_incoming_data(datagram)
 
-        return task.cont
-
-    def __update(self, task):
-        """
-        Gets a datagram from the queue and handles it
-        """
-
-        if not len(self._readable):
-            return task.cont
-
-        datagram = self._readable.pop()
-        di = NetworkDatagramIterator(datagram)
-        if not di.get_remaining_size():
-            return task.cont
-
-        self.handle_internal_datagram(di)
         return task.cont
 
     def __listen_disconnect(self, task):
@@ -322,39 +364,32 @@ class NetworkConnector(NetworkManager):
         Handles disconnection when the socket connection closes
         """
 
-        self.unregister_for_channel(self._channel)
         self.__reader.remove_connection(self.__socket)
 
     def shutdown(self):
+        NetworkChannelManager.shutdown(self)
         if self.__read_task:
             task_mgr.remove(self.__read_task)
-
-        if self.__update_task:
-            task_mgr.remove(self.__update_task)
 
         if self.__disconnect_task:
             task_mgr.remove(self.__disconnect_task)
 
         self.__read_task = None
-        self.__update_task = None
         self.__disconnect_task = None
 
-class NetworkHandler(NetworkManager):
+class NetworkHandler(NetworkChannelManager, NetworkManager):
     notify = notify.new_category('NetworkHandler')
 
     def __init__(self, network, rendezvous, address, connection):
+        NetworkChannelManager.__init__(self)
+
         self._network = network
         self._rendezvous = rendezvous
         self._address = address
         self._connection = connection
 
-        self._old_channel = 0
         self._channel = 0
         self._allocated_channel = 0
-
-        self._readable = collections.deque()
-
-        self.__update_task = None
 
     @property
     def network(self):
@@ -372,82 +407,32 @@ class NetworkHandler(NetworkManager):
     def connection(self):
         return self._connection
 
-    @property
-    def channel(self):
-        return self._channel
-
-    @property
-    def old_channel(self):
-        return self._old_channel
-
-    @channel.setter
-    def channel(self, channel):
-        if not self._channel:
-            self._allocated_channel = channel
-
-        self._old_channel = self._channel
-        self._channel = channel
-
-    @property
-    def allocated_channel(self):
-        return self._allocated_channel
-
-    @allocated_channel.setter
-    def allocated_channel(self, allocated_channel):
-        self._allocated_channel = allocated_channel
-
     def setup(self):
-        self.__update_task = task_mgr.add(self.__update,
-            self.get_unique_name('update-handler'))
-
-        if self._channel:
-            self.register_for_channel(self._channel)
+        NetworkChannelManager.setup(self)
 
     def register_for_channel(self, channel):
         """
         Registers our connections channel with the MessageDirector
         """
 
+        NetworkChannelManager.register_for_channel(self, channel)
+        self._network.add_channel_to_handler(channel, self)
+
         datagram = NetworkDatagram()
         datagram.add_control_header(channel, types.CONTROL_SET_CHANNEL)
         self._network.handle_send_connection_datagram(datagram)
-        self._network.add_channel_to_handler(channel, self)
 
     def unregister_for_channel(self, channel):
         """
         Unregisters our connections channel from the MessageDirector
         """
 
+        NetworkChannelManager.unregister_for_channel(self, channel)
+        self._network.remove_channel_to_handler(channel)
+
         datagram = NetworkDatagram()
         datagram.add_control_header(channel, types.CONTROL_REMOVE_CHANNEL)
         self._network.handle_send_connection_datagram(datagram)
-        self._network.remove_channel_to_handler(channel)
-
-    def handle_set_channel_id(self, channel):
-        if channel == self._channel:
-            return
-
-        self.register_for_channel(channel)
-        if self._old_channel and self._old_channel != self._allocated_channel:
-            self.unregister_for_channel(self._old_channel)
-
-        self.channel = channel
-
-    def __update(self, task):
-        """
-        Gets a datagram from the queue and handles it
-        """
-
-        if not len(self._readable):
-            return task.cont
-
-        datagram = self._readable.pop()
-        di = NetworkDatagramIterator(datagram)
-        if not di.get_remaining_size():
-            return task.cont
-
-        self.handle_datagram(di)
-        return task.cont
 
     def handle_send_datagram(self, datagram):
         """
@@ -484,22 +469,7 @@ class NetworkHandler(NetworkManager):
         self._network.handle_disconnected_handler(self)
 
     def shutdown(self):
-        if self._old_channel:
-            self.unregister_for_channel(self._old_channel)
-            self._old_channel = 0
-
-        if self._channel:
-            self.unregister_for_channel(self._channel)
-            self._channel = 0
-
-        if self._allocated_channel:
-            self.unregister_for_channel(self._allocated_channel)
-            self._allocated_channel = 0
-
-        if self.__update_task:
-            task_mgr.remove(self.__update_task)
-
-        self.__update_task = None
+        NetworkChannelManager.shutdown(self)
 
 class NetworkListener(NetworkManager):
     notify = notify.new_category('NetworkListener')
@@ -530,15 +500,11 @@ class NetworkListener(NetworkManager):
         self.__disconnect_task = None
 
     def setup(self):
-        self.__socket = self.__manager.open_TCP_server_rendezvous(self.__address,
-            self.__port, self.__backlog)
-
+        self.__socket = self.__manager.open_TCP_server_rendezvous(self.__address, self.__port, self.__backlog)
         if not self.__socket:
-            raise NetworkError('Failed to bind TCP socket on address: <%s:%d>!' % (
-                self.__address, self.__port))
+            raise NetworkError('Failed to bind TCP socket on address: <%s:%d>!' % (self.__address, self.__port))
 
         self.__listener.add_connection(self.__socket)
-
         self.__listen_task = task_mgr.add(self.__listen_incoming,
             self.get_unique_name('listen-incoming'))
 
@@ -631,10 +597,11 @@ class NetworkListener(NetworkManager):
         Handles new data incoming from the connection reader
         """
 
-        if not self.has_handler(connection):
+        handler = self._handlers.get(connection)
+        if not handler:
             return
 
-        self._handlers[connection].handle_incoming_data(datagram)
+        handler.handle_incoming_data(datagram)
 
     def has_channel_to_handler(self, channel):
         """
@@ -648,7 +615,7 @@ class NetworkListener(NetworkManager):
         Associates a handler with a channel
         """
 
-        if self.has_channel_to_handler(channel):
+        if channel in self._channel2handlers:
             return
 
         self._channel2handlers[channel] = handler
@@ -658,7 +625,7 @@ class NetworkListener(NetworkManager):
         Removes association of a channel to a handler
         """
 
-        if not self.has_channel_to_handler(channel):
+        if channel not in self._channel2handlers:
             return
 
         del self._channel2handlers[channel]

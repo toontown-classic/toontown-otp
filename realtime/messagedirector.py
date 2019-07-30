@@ -297,11 +297,6 @@ class Participant(io.NetworkHandler):
         self.network.interface.remove_participant(self.channel)
         io.NetworkHandler.handle_disconnected(self)
 
-    def shutdown(self):
-        self.allocated_channel = 0
-        self.channel = 0
-        io.NetworkHandler.shutdown(self)
-
 class ParticipantInterface(object):
     notify = notify.new_category('ParticipantInterface')
 
