@@ -619,13 +619,11 @@ class StateObject(object):
             field_args = None
 
         di = io.NetworkDatagramIterator(datagram)
-        #if field.is_bogus_field():
-        #    self.notify.warning('Cannot handle field update for field: %s dclass: %s, field is bogus!' % (
-        #        field.get_name(), self._dc_class.get_name()))
-        #
-        #    return
 
-        if not self._network.shard_manager.has_shard(sender):
+        # check to ensure that the sender of this update is either an owner
+        # of an existing object, or that they are an AI shard channel:
+        state_object = self._network.object_manager.get_object_by_owner(sender)
+        if state_object is not None:
             avatar_id = self._network.get_avatar_id_from_connection_channel(sender)
             if not avatar_id:
                 self.notify.warning('Cannot handle field update for field: %s dclass: %s, '
@@ -677,6 +675,12 @@ class StateObject(object):
                     else:
                         self._other_fields[field.get_number()] = field_args
         else:
+            if not self._network.shard_manager.has_shard(sender):
+                self.notify.warning('Cannot handle field update for field: %s dclass: %s, '
+                    'unknown sender with channel: %d!' % (field.get_name(), self._dc_class.get_name(), sender))
+
+                return
+
             # we must always send this update to the other receiver,
             # so that they get the field update always even if the field
             # is broadcasted to other objects in the same interest...
@@ -761,6 +765,13 @@ class StateObjectManager(object):
 
     def get_object(self, do_id):
         return self.objects.get(do_id)
+
+    def get_object_by_owner(self, owner_id):
+        for state_object in list(self.objects.values()):
+            if state_object.owner_id == owner_id:
+                return state_object
+
+        return None
 
     def handle_changing_location(self, state_object):
         assert(state_object != None)
