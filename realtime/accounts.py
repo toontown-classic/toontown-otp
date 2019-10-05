@@ -86,7 +86,7 @@ class ClientOperation(FSM):
         if self._callback and success:
             self._callback(*args, **kwargs)
         elif not success:
-            self.notify.warning('Cleanup operation %s was unsuccessful for %s.' % (self.__class__.__name__, self.client))
+            self.notify.debug('Cleanup operation %s was unsuccessful for %s.' % (self.__class__.__name__, self.client))
 
 class ClientOperationManager(object):
     notify = notify.new_category('ClientOperationManager')
@@ -589,7 +589,7 @@ class LoadFriendsListFSM(ClientOperation):
 
     def enterQueryFriends(self):
         friends_list, = self._fields['setFriendsList']
-        if friends_list == None:
+        if not friends_list:
             self.cleanup(False)
             return
 
