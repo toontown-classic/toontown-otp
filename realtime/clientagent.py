@@ -346,6 +346,20 @@ class Client(io.NetworkHandler):
         datagram.add_uint32(avatar_id)
         self.handle_send_datagram(datagram)
 
+    def _delete_ownerviews(self):
+        account_id = self.get_account_id_from_channel_code(self.channel)
+        avatar_id = self.get_avatar_id_from_connection_channel(self.channel)
+
+        # close the avatar channel:
+        channel = self.get_puppet_connection_channel(avatar_id)
+        self.unregister_for_channel(channel)
+
+        # once again open the account channel, also closing the avatar sender channel:
+        channel = account_id << 32
+        self.handle_set_channel_id(channel)
+
+        self._owned_objects = []
+
     def handle_set_avatar(self, di):
         try:
             avatar_id = di.get_uint32()
@@ -353,6 +367,12 @@ class Client(io.NetworkHandler):
             self.handle_send_disconnect(types.CLIENT_DISCONNECT_TRUNCATED_DATAGRAM,
                 'Received truncated datagram from channel: %d!' % self._channel)
 
+            return
+
+        # check to see if the client want's to delete their ownerview,
+        # we assume the client has logged out to the avatar chooser:
+        if avatar_id == 0:
+            self._delete_ownerviews()
             return
 
         account_id = self.get_account_id_from_channel_code(self.channel)
