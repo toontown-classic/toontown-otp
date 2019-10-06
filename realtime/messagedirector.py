@@ -92,6 +92,7 @@ class MessageInterface(object):
     def __init__(self, network):
         self._network = network
         self._flush_timeout = config.GetFloat('messagedirector-flush-timeout', 0.001)
+        self._route_noqueue = config.GetBool('messagedirector-route-noqueue', False)
         self._messages = collections.deque()
         self._post_messages = {}
 
@@ -114,6 +115,10 @@ class MessageInterface(object):
         #    return
 
         message_handle = MessageHandle(channel, sender, message_type, datagram)
+        if self._route_noqueue:
+            self.route_datagram_noqueue(message_handle)
+            return
+
         self._messages.append(message_handle)
 
     def remove_handle(self, message_handle):
@@ -177,6 +182,13 @@ class MessageInterface(object):
 
         message_handle.destroy()
         del message_handle
+
+    def route_datagram_noqueue(self, message_handle):
+        participant = self._network.interface.get_participant(message_handle.channel)
+        if not participant:
+            return
+
+        self.route_datagram(message_handle, participant)
 
     def __flush(self, task):
         for _ in xrange(len(self._messages)):
