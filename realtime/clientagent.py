@@ -358,7 +358,12 @@ class Client(io.NetworkHandler):
         channel = account_id << 32
         self.handle_set_channel_id(channel)
 
+        # clear any of the cached distributed objects:
+        self._seen_objects = {}
         self._owned_objects = []
+        self._pending_objects = []
+
+        self._dna_stores = {}
 
     def handle_set_avatar(self, di):
         try:
