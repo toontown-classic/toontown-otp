@@ -9,6 +9,7 @@ net-want-threads #f
 messagedirector-address 0.0.0.0
 messagedirector-port 7100
 messagedirector-flush-timeout 0.001
+messagedirector-route-noqueue #t
 
 # ClientAgent:
 clientagent-address 0.0.0.0
