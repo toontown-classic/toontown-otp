@@ -365,6 +365,9 @@ class Client(io.NetworkHandler):
 
         self._dna_stores = {}
 
+        # clear our old interest zones:
+        self._interest_manager.clear()
+
     def handle_set_avatar(self, di):
         try:
             avatar_id = di.get_uint32()
