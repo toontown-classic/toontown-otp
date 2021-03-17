@@ -383,6 +383,11 @@ class Client(io.NetworkHandler):
             self._delete_ownerviews()
             return
 
+        # before continuing to activate an avatar with the associated ID sent above,
+        # check to make sure the client does not already has an actively generated avatar on the SS:
+        if len(self._owned_objects) > 0:
+            return
+
         account_id = self.get_account_id_from_channel_code(self.channel)
         self.network.account_manager.handle_operation(LoadAvatarFSM, self,
             self.__handle_set_avatar_resp, account_id, avatar_id)
